@@ -1,0 +1,40 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'margin-offer-store'
+    static_configs:
+      - targets: ['store:8080']
+    scrape_interval: 5s
+    metrics_path: /metrics
+
+  - job_name: 'margin-offer-etl'
+    static_configs:
+      - targets: ['etl:8081']
+    scrape_interval: 5s
+    metrics_path: /metrics
+
+  - job_name: 'margin-offer-backfiller'
+    static_configs:
+      - targets: ['backfiller:8082']
+    scrape_interval: 5s
+    metrics_path: /metrics
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # - alertmanager:9093
+
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+rule_files:
+  - "alerts/*.yml"

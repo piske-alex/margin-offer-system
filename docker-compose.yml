@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  store:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.store
+    ports:
+      - "8080:8080"
+    environment:
+      - LOG_LEVEL=info
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  etl:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.etl
+    environment:
+      - LOG_LEVEL=info
+      - STORE_ADDR=store:8080
+      - CHAIN_ENDPOINT=wss://api.mainnet-beta.solana.com
+    depends_on:
+      - store
+    restart: unless-stopped
+
+  backfiller:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backfiller
+    environment:
+      - LOG_LEVEL=info
+      - STORE_ADDR=store:8080
+      - CHAIN_ENDPOINT=wss://api.mainnet-beta.solana.com
+    depends_on:
+      - store
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources
+    restart: unless-stopped
+
+volumes:
+  grafana-storage:
+
+networks:
+  default:
+    name: margin-offer-network
