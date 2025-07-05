@@ -1,0 +1,153 @@
+syntax = "proto3";
+
+package marginoffer.v1;
+
+option go_package = "github.com/piske-alex/margin-offer-system/proto/gen/go";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// MarginOffer message definition
+message MarginOffer {
+  string id = 1;
+  string offer_type = 2; // V1, BP, LV
+  string collateral_token = 3;
+  string borrow_token = 4;
+  double available_borrow_amount = 5;
+  double max_open_ltv = 6;
+  double liquidation_ltv = 7;
+  double interest_rate = 8;
+  string interest_model = 9; // fixed, floating
+  optional int32 term_days = 10;
+  string liquidity_source = 11;
+  optional string lender_address = 12;
+  optional google.protobuf.Timestamp last_borrowed_timestamp = 13;
+  google.protobuf.Timestamp created_timestamp = 14;
+  google.protobuf.Timestamp updated_timestamp = 15;
+}
+
+// Request messages
+message CreateMarginOfferRequest {
+  MarginOffer offer = 1;
+}
+
+message GetMarginOfferRequest {
+  string id = 1;
+}
+
+message UpdateMarginOfferRequest {
+  MarginOffer offer = 1;
+}
+
+message DeleteMarginOfferRequest {
+  string id = 1;
+}
+
+message ListMarginOffersRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+  optional string sort_by = 3;
+  optional string sort_order = 4;
+  
+  // Filters
+  optional string offer_type = 5;
+  optional string collateral_token = 6;
+  optional string borrow_token = 7;
+  optional string interest_model = 8;
+  optional string liquidity_source = 9;
+  optional string lender_address = 10;
+  
+  // Range filters
+  optional double min_borrow_amount = 11;
+  optional double max_borrow_amount = 12;
+  optional double min_interest_rate = 13;
+  optional double max_interest_rate = 14;
+  
+  // Time filters
+  optional google.protobuf.Timestamp created_after = 15;
+  optional google.protobuf.Timestamp created_before = 16;
+  
+  // Status filters
+  bool include_expired = 17;
+  bool active_only = 18;
+}
+
+message BulkCreateMarginOffersRequest {
+  repeated MarginOffer offers = 1;
+  bool ignore_conflicts = 2;
+  bool validate_all = 3;
+}
+
+message BulkUpdateMarginOffersRequest {
+  repeated MarginOffer offers = 1;
+  bool upsert = 2;
+  bool partial_update = 3;
+}
+
+message BulkDeleteMarginOffersRequest {
+  repeated string ids = 1;
+  bool ignore_not_found = 2;
+}
+
+// Response messages
+message CreateMarginOfferResponse {
+  MarginOffer offer = 1;
+}
+
+message GetMarginOfferResponse {
+  MarginOffer offer = 1;
+}
+
+message UpdateMarginOfferResponse {
+  MarginOffer offer = 1;
+}
+
+message ListMarginOffersResponse {
+  repeated MarginOffer offers = 1;
+  int64 total = 2;
+  int32 limit = 3;
+  int32 offset = 4;
+  bool has_more = 5;
+  optional int32 next_offset = 6;
+}
+
+message BulkOperationResponse {
+  int32 success_count = 1;
+  int32 failure_count = 2;
+  repeated BulkError errors = 3;
+  repeated string processed_ids = 4;
+}
+
+message BulkError {
+  int32 index = 1;
+  string id = 2;
+  string error = 3;
+  string code = 4;
+}
+
+message HealthCheckResponse {
+  string status = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  string version = 3;
+  map<string, string> checks = 4;
+}
+
+// Service definition
+service MarginOfferService {
+  // CRUD operations
+  rpc CreateMarginOffer(CreateMarginOfferRequest) returns (CreateMarginOfferResponse);
+  rpc GetMarginOffer(GetMarginOfferRequest) returns (GetMarginOfferResponse);
+  rpc UpdateMarginOffer(UpdateMarginOfferRequest) returns (UpdateMarginOfferResponse);
+  rpc DeleteMarginOffer(DeleteMarginOfferRequest) returns (google.protobuf.Empty);
+  
+  // List operations
+  rpc ListMarginOffers(ListMarginOffersRequest) returns (ListMarginOffersResponse);
+  
+  // Bulk operations
+  rpc BulkCreateMarginOffers(BulkCreateMarginOffersRequest) returns (BulkOperationResponse);
+  rpc BulkUpdateMarginOffers(BulkUpdateMarginOffersRequest) returns (BulkOperationResponse);
+  rpc BulkDeleteMarginOffers(BulkDeleteMarginOffersRequest) returns (BulkOperationResponse);
+  
+  // Health check
+  rpc HealthCheck(google.protobuf.Empty) returns (HealthCheckResponse);
+}
