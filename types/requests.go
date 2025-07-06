@@ -97,15 +97,29 @@ type BulkCreateRequest struct {
 
 // BulkUpdateRequest represents a request for bulk updating margin offers
 type BulkUpdateRequest struct {
-	Offers     []*MarginOffer `json:"offers" validate:"required,min=1,max=1000"`
-	Upsert     bool           `json:"upsert"`
-	PartialUpdate bool        `json:"partial_update"`
+	Offers        []*MarginOffer `json:"offers" validate:"required,min=1,max=1000"`
+	Upsert        bool           `json:"upsert"`
+	PartialUpdate bool           `json:"partial_update"`
+}
+
+// BulkCreateOrUpdateRequest represents a request for bulk upsert operations
+type BulkCreateOrUpdateRequest struct {
+	Offers      []*MarginOffer `json:"offers" validate:"required,min=1,max=1000"`
+	ValidateAll bool           `json:"validate_all"`
+}
+
+// BulkOverwriteRequest represents a request for bulk overwrite operations
+type BulkOverwriteRequest struct {
+	Offers      []*MarginOffer   `json:"offers" validate:"required,min=0,max=1000"`
+	Filter      *OverwriteFilter `json:"filter,omitempty"`
+	ValidateAll bool             `json:"validate_all"`
+	DryRun      bool             `json:"dry_run"` // Preview operation without executing
 }
 
 // BulkDeleteRequest represents a request for bulk deleting margin offers
 type BulkDeleteRequest struct {
-	IDs        []string `json:"ids" validate:"required,min=1,max=1000"`
-	IgnoreNotFound bool `json:"ignore_not_found"`
+	IDs            []string `json:"ids" validate:"required,min=1,max=1000"`
+	IgnoreNotFound bool     `json:"ignore_not_found"`
 }
 
 // StatsRequest represents a request for statistics
@@ -115,4 +129,9 @@ type StatsRequest struct {
 	StartTime   *time.Time `json:"start_time,omitempty"`
 	EndTime     *time.Time `json:"end_time,omitempty"`
 	Granularity string     `json:"granularity,omitempty"` // "hour", "day", "week", "month"
+}
+
+// OverwritePreviewRequest represents a request to preview an overwrite operation
+type OverwritePreviewRequest struct {
+	Filter *OverwriteFilter `json:"filter,omitempty"`
 }
