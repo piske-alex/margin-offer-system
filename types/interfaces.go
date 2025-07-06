@@ -13,6 +13,9 @@ type MarginOfferStore interface {
 	Update(ctx context.Context, offer *MarginOffer) error
 	Delete(ctx context.Context, id string) error
 	
+	// CreateOrUpdate operations (upsert)
+	CreateOrUpdate(ctx context.Context, offer *MarginOffer) error
+	
 	// Query operations
 	List(ctx context.Context, req *ListRequest) ([]*MarginOffer, error)
 	ListByLender(ctx context.Context, lenderAddress string, req *ListRequest) ([]*MarginOffer, error)
@@ -24,6 +27,13 @@ type MarginOfferStore interface {
 	BulkUpdate(ctx context.Context, offers []*MarginOffer) error
 	BulkDelete(ctx context.Context, ids []string) error
 	
+	// Bulk CreateOrUpdate operations (upsert)
+	BulkCreateOrUpdate(ctx context.Context, offers []*MarginOffer) error
+	
+	// Bulk overwrite operations - replaces entire dataset
+	BulkOverwrite(ctx context.Context, offers []*MarginOffer) error
+	BulkOverwriteByFilter(ctx context.Context, offers []*MarginOffer, filter *OverwriteFilter) error
+	
 	// Stats and aggregation
 	Count(ctx context.Context) (int64, error)
 	CountByOfferType(ctx context.Context, offerType OfferType) (int64, error)
@@ -32,6 +42,22 @@ type MarginOfferStore interface {
 	// Health and maintenance
 	HealthCheck(ctx context.Context) error
 	Close() error
+}
+
+// OverwriteFilter defines criteria for partial overwrite operations
+type OverwriteFilter struct {
+	// Filter criteria - offers matching these will be deleted before inserting new ones
+	OfferType       *OfferType `json:"offer_type,omitempty"`
+	CollateralToken *string    `json:"collateral_token,omitempty"`
+	BorrowToken     *string    `json:"borrow_token,omitempty"`
+	LenderAddress   *string    `json:"lender_address,omitempty"`
+	LiquiditySource *string    `json:"liquidity_source,omitempty"`
+	
+	// Time-based filters
+	CreatedAfter  *time.Time `json:"created_after,omitempty"`
+	CreatedBefore *time.Time `json:"created_before,omitempty"`
+	UpdatedAfter  *time.Time `json:"updated_after,omitempty"`
+	UpdatedBefore *time.Time `json:"updated_before,omitempty"`
 }
 
 // ETLProcessor defines the interface for processing blockchain events
