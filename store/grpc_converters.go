@@ -117,6 +117,66 @@ func (s *GRPCServer) marginOfferToProto(offer *types.MarginOffer) (*pb.MarginOff
 	return proto, nil
 }
 
+// protoToOverwriteFilter converts protobuf OverwriteFilter to types.OverwriteFilter
+func (s *GRPCServer) protoToOverwriteFilter(proto *pb.OverwriteFilter) (*types.OverwriteFilter, error) {
+	if proto == nil {
+		return nil, nil
+	}
+
+	filter := &types.OverwriteFilter{}
+
+	// Handle offer type
+	if proto.OfferType != nil {
+		switch *proto.OfferType {
+		case "V1":
+			offerType := types.OfferTypeV1
+			filter.OfferType = &offerType
+		case "BP":
+			offerType := types.OfferTypeBP
+			filter.OfferType = &offerType
+		case "LV":
+			offerType := types.OfferTypeLV
+			filter.OfferType = &offerType
+		default:
+			return nil, fmt.Errorf("invalid offer type: %s", *proto.OfferType)
+		}
+	}
+
+	// Handle string fields
+	if proto.CollateralToken != nil {
+		filter.CollateralToken = proto.CollateralToken
+	}
+	if proto.BorrowToken != nil {
+		filter.BorrowToken = proto.BorrowToken
+	}
+	if proto.LenderAddress != nil {
+		filter.LenderAddress = proto.LenderAddress
+	}
+	if proto.LiquiditySource != nil {
+		filter.LiquiditySource = proto.LiquiditySource
+	}
+
+	// Handle time fields
+	if proto.CreatedAfter != nil {
+		createdAfter := proto.CreatedAfter.AsTime()
+		filter.CreatedAfter = &createdAfter
+	}
+	if proto.CreatedBefore != nil {
+		createdBefore := proto.CreatedBefore.AsTime()
+		filter.CreatedBefore = &createdBefore
+	}
+	if proto.UpdatedAfter != nil {
+		updatedAfter := proto.UpdatedAfter.AsTime()
+		filter.UpdatedAfter = &updatedAfter
+	}
+	if proto.UpdatedBefore != nil {
+		updatedBefore := proto.UpdatedBefore.AsTime()
+		filter.UpdatedBefore = &updatedBefore
+	}
+
+	return filter, nil
+}
+
 // protoToListRequest converts protobuf ListRequest to types.ListRequest
 func (s *GRPCServer) protoToListRequest(proto *pb.ListMarginOffersRequest) (*types.ListRequest, error) {
 	if proto == nil {

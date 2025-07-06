@@ -115,13 +115,13 @@ func (p *Processor) ProcessMarginOfferEvent(ctx context.Context, event *types.Ma
 		return result
 	}
 	
-	// Process based on event type
+	// Process based on event type - use CreateOrUpdate for all events to consolidate logic
 	var err error
 	switch event.EventType {
 	case types.EventTypeMarginOfferCreated:
-		err = p.handleMarginOfferCreated(ctx, event)
+		err = p.handleMarginOfferCreatedOrUpdated(ctx, event)
 	case types.EventTypeMarginOfferUpdated:
-		err = p.handleMarginOfferUpdated(ctx, event)
+		err = p.handleMarginOfferCreatedOrUpdated(ctx, event)
 	case types.EventTypeMarginOfferDeleted:
 		err = p.handleMarginOfferDeleted(ctx, event)
 	default:
@@ -173,8 +173,8 @@ func (p *Processor) ProcessLiquidityEvent(ctx context.Context, event *types.Liqu
 		return result
 	}
 	
-	// Update the offer in store
-	if err := p.store.Update(ctx, offer); err != nil {
+	// Use CreateOrUpdate to handle the update
+	if err := p.store.CreateOrUpdate(ctx, offer); err != nil {
 		result.Success = false
 		result.Error = err.Error()
 		p.metrics.IncCounter("events_processing_failed", map[string]string{"type": "liquidity"})
@@ -210,8 +210,8 @@ func (p *Processor) ProcessInterestRateEvent(ctx context.Context, event *types.I
 	offer.InterestRate = event.NewRate
 	offer.InterestModel = event.RateModel
 	
-	// Update the offer in store
-	if err := p.store.Update(ctx, offer); err != nil {
+	// Use CreateOrUpdate to handle the update
+	if err := p.store.CreateOrUpdate(ctx, offer); err != nil {
 		result.Success = false
 		result.Error = err.Error()
 		p.metrics.IncCounter("events_processing_failed", map[string]string{"type": "interest_rate"})
@@ -223,8 +223,8 @@ func (p *Processor) ProcessInterestRateEvent(ctx context.Context, event *types.I
 	return result
 }
 
-// Event type handlers
-func (p *Processor) handleMarginOfferCreated(ctx context.Context, event *types.MarginOfferEvent) error {
+// Event type handlers - consolidated create/update logic
+func (p *Processor) handleMarginOfferCreatedOrUpdated(ctx context.Context, event *types.MarginOfferEvent) error {
 	if event.OfferData == nil {
 		return types.ErrInvalidEventData
 	}
@@ -234,23 +234,14 @@ func (p *Processor) handleMarginOfferCreated(ctx context.Context, event *types.M
 		event.OfferData.ID = event.OfferID
 	}
 	
-	// Set creation timestamp from event
-	event.OfferData.CreatedTimestamp = event.Timestamp
-	event.OfferData.UpdatedTimestamp = event.Timestamp
-	
-	return p.store.Create(ctx, event.OfferData)
-}
-
-func (p *Processor) handleMarginOfferUpdated(ctx context.Context, event *types.MarginOfferEvent) error {
-	if event.OfferData == nil {
-		return types.ErrInvalidEventData
+	// Set timestamps from event
+	if event.OfferData.CreatedTimestamp.IsZero() {
+		event.OfferData.CreatedTimestamp = event.Timestamp
 	}
-	
-	// Ensure the offer has the correct ID
-	event.OfferData.ID = event.OfferID
 	event.OfferData.UpdatedTimestamp = event.Timestamp
 	
-	return p.store.Update(ctx, event.OfferData)
+	// Use CreateOrUpdate for consolidated logic
+	return p.store.CreateOrUpdate(ctx, event.OfferData)
 }
 
 func (p *Processor) handleMarginOfferDeleted(ctx context.Context, event *types.MarginOfferEvent) error {
