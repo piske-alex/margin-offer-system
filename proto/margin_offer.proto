@@ -26,6 +26,19 @@ message MarginOffer {
   google.protobuf.Timestamp updated_timestamp = 15;
 }
 
+// OverwriteFilter message definition
+message OverwriteFilter {
+  optional string offer_type = 1;
+  optional string collateral_token = 2;
+  optional string borrow_token = 3;
+  optional string lender_address = 4;
+  optional string liquidity_source = 5;
+  optional google.protobuf.Timestamp created_after = 6;
+  optional google.protobuf.Timestamp created_before = 7;
+  optional google.protobuf.Timestamp updated_after = 8;
+  optional google.protobuf.Timestamp updated_before = 9;
+}
+
 // Request messages
 message CreateMarginOfferRequest {
   MarginOffer offer = 1;
@@ -36,6 +49,10 @@ message GetMarginOfferRequest {
 }
 
 message UpdateMarginOfferRequest {
+  MarginOffer offer = 1;
+}
+
+message CreateOrUpdateMarginOfferRequest {
   MarginOffer offer = 1;
 }
 
@@ -84,9 +101,25 @@ message BulkUpdateMarginOffersRequest {
   bool partial_update = 3;
 }
 
+message BulkCreateOrUpdateMarginOffersRequest {
+  repeated MarginOffer offers = 1;
+  bool validate_all = 2;
+}
+
+message BulkOverwriteMarginOffersRequest {
+  repeated MarginOffer offers = 1;
+  optional OverwriteFilter filter = 2;
+  bool validate_all = 3;
+  bool dry_run = 4;
+}
+
 message BulkDeleteMarginOffersRequest {
   repeated string ids = 1;
   bool ignore_not_found = 2;
+}
+
+message OverwritePreviewRequest {
+  optional OverwriteFilter filter = 1;
 }
 
 // Response messages
@@ -100,6 +133,11 @@ message GetMarginOfferResponse {
 
 message UpdateMarginOfferResponse {
   MarginOffer offer = 1;
+}
+
+message CreateOrUpdateMarginOfferResponse {
+  MarginOffer offer = 1;
+  bool was_created = 2; // true if created, false if updated
 }
 
 message ListMarginOffersResponse {
@@ -116,6 +154,19 @@ message BulkOperationResponse {
   int32 failure_count = 2;
   repeated BulkError errors = 3;
   repeated string processed_ids = 4;
+}
+
+message BulkOverwriteResponse {
+  int32 deleted_count = 1;
+  int32 created_count = 2;
+  repeated string deleted_ids = 3;
+  repeated string created_ids = 4;
+  repeated BulkError errors = 5;
+}
+
+message OverwritePreviewResponse {
+  int32 affected_count = 1;
+  repeated string affected_ids = 2;
 }
 
 message BulkError {
@@ -140,6 +191,9 @@ service MarginOfferService {
   rpc UpdateMarginOffer(UpdateMarginOfferRequest) returns (UpdateMarginOfferResponse);
   rpc DeleteMarginOffer(DeleteMarginOfferRequest) returns (google.protobuf.Empty);
   
+  // CreateOrUpdate operation (upsert)
+  rpc CreateOrUpdateMarginOffer(CreateOrUpdateMarginOfferRequest) returns (CreateOrUpdateMarginOfferResponse);
+  
   // List operations
   rpc ListMarginOffers(ListMarginOffersRequest) returns (ListMarginOffersResponse);
   
@@ -147,6 +201,13 @@ service MarginOfferService {
   rpc BulkCreateMarginOffers(BulkCreateMarginOffersRequest) returns (BulkOperationResponse);
   rpc BulkUpdateMarginOffers(BulkUpdateMarginOffersRequest) returns (BulkOperationResponse);
   rpc BulkDeleteMarginOffers(BulkDeleteMarginOffersRequest) returns (BulkOperationResponse);
+  
+  // Bulk CreateOrUpdate operation (bulk upsert)
+  rpc BulkCreateOrUpdateMarginOffers(BulkCreateOrUpdateMarginOffersRequest) returns (BulkOperationResponse);
+  
+  // Bulk overwrite operations
+  rpc BulkOverwriteMarginOffers(BulkOverwriteMarginOffersRequest) returns (BulkOverwriteResponse);
+  rpc OverwritePreview(OverwritePreviewRequest) returns (OverwritePreviewResponse);
   
   // Health check
   rpc HealthCheck(google.protobuf.Empty) returns (HealthCheckResponse);

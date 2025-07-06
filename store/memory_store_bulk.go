@@ -7,7 +7,7 @@ import (
 	"github.com/piske-alex/margin-offer-system/types"
 )
 
-// BulkCreate adds multiple margin offers to the store
+// BulkCreate adds multiple margin offers to the store (fails if any already exist)
 func (ms *MemoryStore) BulkCreate(ctx context.Context, offers []*types.MarginOffer) error {
 	if len(offers) == 0 {
 		return nil
@@ -58,7 +58,7 @@ func (ms *MemoryStore) BulkCreate(ctx context.Context, offers []*types.MarginOff
 	return nil
 }
 
-// BulkUpdate modifies multiple existing margin offers
+// BulkUpdate modifies multiple existing margin offers (fails if any don't exist)
 func (ms *MemoryStore) BulkUpdate(ctx context.Context, offers []*types.MarginOffer) error {
 	if len(offers) == 0 {
 		return nil
@@ -94,8 +94,9 @@ func (ms *MemoryStore) BulkUpdate(ctx context.Context, offers []*types.MarginOff
 		// Remove from old indexes
 		ms.removeFromIndexes(oldOffers[i])
 		
-		// Update timestamp
-		offer.UpdateTimestamp()
+		// Preserve creation timestamp and update timestamp
+		offer.CreatedTimestamp = oldOffers[i].CreatedTimestamp
+		offer.UpdatedTimestamp = now
 		
 		// Store the updated offer
 		ms.offers[offer.ID] = offer.Clone()
