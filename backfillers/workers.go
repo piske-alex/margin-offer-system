@@ -102,7 +102,7 @@ func (b *Backfiller) processChainBackfill(ctx context.Context, req *types.Backfi
 	
 	progress.TotalRecords = int64(len(offers))
 	
-	// Process in batches
+	// Process in batches using BulkCreateOrUpdate for consolidated logic
 	batchSize := int(req.BatchSize)
 	for i := 0; i < len(offers); i += batchSize {
 		end := i + batchSize
@@ -115,12 +115,11 @@ func (b *Backfiller) processChainBackfill(ctx context.Context, req *types.Backfi
 		if req.DryRun {
 			b.logger.Info("Dry run: would process batch", "size", len(batch))
 		} else {
-			if err := b.store.BulkCreate(ctx, batch); err != nil {
-				// Try bulk update if create fails
-				if err := b.store.BulkUpdate(ctx, batch); err != nil {
-					progress.FailedRecords += int64(len(batch))
-					continue
-				}
+			// Use BulkCreateOrUpdate instead of separate create/update logic
+			if err := b.store.BulkCreateOrUpdate(ctx, batch); err != nil {
+				progress.FailedRecords += int64(len(batch))
+				b.logger.Warn("Failed to process batch", "error", err, "batch_size", len(batch))
+				continue
 			}
 		}
 		
@@ -128,6 +127,18 @@ func (b *Backfiller) processChainBackfill(ctx context.Context, req *types.Backfi
 		progress.SuccessRecords += int64(len(batch))
 		progress.CurrentBatch++
 		progress.Progress = float64(progress.ProcessedRecords) / float64(progress.TotalRecords)
+		
+		// Calculate throughput
+		elapsed := time.Since(progress.StartTime)
+		if elapsed > 0 {
+			progress.Throughput = float64(progress.ProcessedRecords) / elapsed.Seconds()
+		}
+		
+		// Estimate remaining time
+		if progress.Throughput > 0 {
+			remainingRecords := progress.TotalRecords - progress.ProcessedRecords
+			progress.RemainingTime = time.Duration(float64(remainingRecords)/progress.Throughput) * time.Second
+		}
 		
 		// Check for cancellation
 		select {
@@ -157,9 +168,9 @@ func (b *Backfiller) processGlacierBackfill(ctx context.Context, req *types.Back
 	
 	progress.TotalRecords = int64(len(offers))
 	
-	// Process offers (similar to chain backfill)
+	// Process offers using BulkCreateOrUpdate
 	if !req.DryRun && len(offers) > 0 {
-		if err := b.store.BulkCreate(ctx, offers); err != nil {
+		if err := b.store.BulkCreateOrUpdate(ctx, offers); err != nil {
 			return err
 		}
 	}
@@ -185,9 +196,63 @@ func (b *Backfiller) processOffChainBackfill(ctx context.Context, req *types.Bac
 	
 	progress.TotalRecords = int64(len(offers))
 	
-	// Process offers
+	// Process offers using BulkCreateOrUpdate
 	if !req.DryRun && len(offers) > 0 {
-		if err := b.store.BulkCreate(ctx, offers); err != nil {
+		if err := b.store.BulkCreateOrUpdate(ctx, offers); err != nil {
+			return err
+		}
+	}
+	
+	progress.ProcessedRecords = int64(len(offers))
+	progress.SuccessRecords = int64(len(offers))
+	progress.Progress = 1.0
+	
+	return nil
+}
+
+// processOverwriteBackfill handles overwrite backfill operations
+func (b *Backfiller) processOverwriteBackfill(ctx context.Context, req *types.BackfillRequest, filter *types.OverwriteFilter, progress *types.BackfillProgress) error {
+	// Fetch data based on source
+	var offers []*types.MarginOffer
+	var err error
+	
+	switch req.Source {
+	case "chain":
+		if req.ChainParams == nil {
+			return types.ErrInvalidBackfillRange
+		}
+		offers, err = b.FetchFromChain(ctx, req.ChainParams.StartBlock, req.ChainParams.EndBlock)
+	case "glacier":
+		offers, err = b.FetchFromGlacier(ctx, req.StartTime, req.EndTime)
+	case "off-chain":
+		if req.OffChainParams == nil {
+			return types.ErrInvalidBackfillRange
+		}
+		offers, err = b.FetchFromOffChain(ctx, req.OffChainParams.APIEndpoint)
+	default:
+		return types.ErrBackfillSourceUnavailable
+	}
+	
+	if err != nil {
+		return err
+	}
+	
+	progress.TotalRecords = int64(len(offers))
+	
+	// Preview what would be overwritten
+	affectedCount, err := b.store.GetOverwriteStats(ctx, filter)
+	if err != nil {
+		return err
+	}
+	
+	b.logger.Info("Overwrite backfill preview", 
+		"job_id", progress.JobID,
+		"new_records", len(offers),
+		"affected_records", affectedCount)
+	
+	// Perform the overwrite operation
+	if !req.DryRun {
+		if err := b.store.BulkOverwriteByFilter(ctx, offers, filter); err != nil {
 			return err
 		}
 	}

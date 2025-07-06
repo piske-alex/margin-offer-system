@@ -22,6 +22,29 @@ type BulkOperationResponse struct {
 	Metadata     map[string]string `json:"metadata,omitempty"`
 }
 
+// BulkOverwriteResponse represents the response for bulk overwrite operations
+type BulkOverwriteResponse struct {
+	DeletedCount int32             `json:"deleted_count"`
+	CreatedCount int32             `json:"created_count"`
+	DeletedIDs   []string          `json:"deleted_ids"`
+	CreatedIDs   []string          `json:"created_ids"`
+	Errors       []BulkError       `json:"errors,omitempty"`
+	Duration     time.Duration     `json:"duration"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
+}
+
+// CreateOrUpdateResponse represents the response for upsert operations
+type CreateOrUpdateResponse struct {
+	Offer      *MarginOffer `json:"offer"`
+	WasCreated bool         `json:"was_created"` // true if created, false if updated
+}
+
+// OverwritePreviewResponse represents the response for overwrite preview operations
+type OverwritePreviewResponse struct {
+	AffectedCount int32    `json:"affected_count"`
+	AffectedIDs   []string `json:"affected_ids"`
+}
+
 // BulkError represents an error that occurred during bulk operations
 type BulkError struct {
 	Index   int32  `json:"index"`
