@@ -24,6 +24,7 @@ message MarginOffer {
   optional google.protobuf.Timestamp last_borrowed_timestamp = 13;
   google.protobuf.Timestamp created_timestamp = 14;
   google.protobuf.Timestamp updated_timestamp = 15;
+  optional string source = 16; // e.g., "marginfi", "jupiter", "manual"
 }
 
 // OverwriteFilter message definition
@@ -33,10 +34,11 @@ message OverwriteFilter {
   optional string borrow_token = 3;
   optional string lender_address = 4;
   optional string liquidity_source = 5;
-  optional google.protobuf.Timestamp created_after = 6;
-  optional google.protobuf.Timestamp created_before = 7;
-  optional google.protobuf.Timestamp updated_after = 8;
-  optional google.protobuf.Timestamp updated_before = 9;
+  optional string source = 6;
+  optional google.protobuf.Timestamp created_after = 7;
+  optional google.protobuf.Timestamp created_before = 8;
+  optional google.protobuf.Timestamp updated_after = 9;
+  optional google.protobuf.Timestamp updated_before = 10;
 }
 
 // Request messages
@@ -73,20 +75,21 @@ message ListMarginOffersRequest {
   optional string interest_model = 8;
   optional string liquidity_source = 9;
   optional string lender_address = 10;
+  optional string source = 11;
   
   // Range filters
-  optional double min_borrow_amount = 11;
-  optional double max_borrow_amount = 12;
-  optional double min_interest_rate = 13;
-  optional double max_interest_rate = 14;
+  optional double min_borrow_amount = 12;
+  optional double max_borrow_amount = 13;
+  optional double min_interest_rate = 14;
+  optional double max_interest_rate = 15;
   
   // Time filters
-  optional google.protobuf.Timestamp created_after = 15;
-  optional google.protobuf.Timestamp created_before = 16;
+  optional google.protobuf.Timestamp created_after = 16;
+  optional google.protobuf.Timestamp created_before = 17;
   
   // Status filters
-  bool include_expired = 17;
-  bool active_only = 18;
+  bool include_expired = 18;
+  bool active_only = 19;
 }
 
 message BulkCreateMarginOffersRequest {
@@ -183,6 +186,65 @@ message HealthCheckResponse {
   map<string, string> checks = 4;
 }
 
+// Subscription messages
+message SubscribeMarginOffersRequest {
+  // Filter for specific types of changes
+  optional string offer_type = 1;
+  optional string collateral_token = 2;
+  optional string borrow_token = 3;
+  optional string liquidity_source = 4;
+  optional string lender_address = 5;
+  optional string source = 6;
+  
+  // Subscribe to specific change types
+  bool subscribe_created = 7;
+  bool subscribe_updated = 8;
+  bool subscribe_deleted = 9;
+  bool subscribe_overwritten = 10;
+  
+  // Client identification
+  string client_id = 11;
+  string session_id = 12;
+}
+
+message MarginOfferChange {
+  enum ChangeType {
+    UNKNOWN = 0;
+    CREATED = 1;
+    UPDATED = 2;
+    DELETED = 3;
+    OVERWRITTEN = 4;
+  }
+  
+  ChangeType change_type = 1;
+  MarginOffer offer = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  string source = 4; // e.g., "backfiller", "api", "manual"
+  string operation_id = 5; // Unique ID for the operation that caused this change
+  map<string, string> metadata = 6; // Additional context about the change
+}
+
+message SubscribeMarginOffersResponse {
+  oneof event {
+    MarginOfferChange change = 1;
+    SubscriptionHeartbeat heartbeat = 2;
+    SubscriptionError error = 3;
+  }
+}
+
+message SubscriptionHeartbeat {
+  google.protobuf.Timestamp timestamp = 1;
+  string client_id = 2;
+  string session_id = 3;
+}
+
+message SubscriptionError {
+  string error_code = 1;
+  string error_message = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  bool fatal = 4; // If true, the subscription should be terminated
+}
+
 // Service definition
 service MarginOfferService {
   // CRUD operations
@@ -202,7 +264,7 @@ service MarginOfferService {
   rpc BulkUpdateMarginOffers(BulkUpdateMarginOffersRequest) returns (BulkOperationResponse);
   rpc BulkDeleteMarginOffers(BulkDeleteMarginOffersRequest) returns (BulkOperationResponse);
   
-  // Bulk CreateOrUpdate operation (bulk upsert)
+  // Bulk CreateOrUpdate operations (upsert)
   rpc BulkCreateOrUpdateMarginOffers(BulkCreateOrUpdateMarginOffersRequest) returns (BulkOperationResponse);
   
   // Bulk overwrite operations
@@ -211,4 +273,7 @@ service MarginOfferService {
   
   // Health check
   rpc HealthCheck(google.protobuf.Empty) returns (HealthCheckResponse);
+  
+  // Subscription service
+  rpc SubscribeMarginOffers(SubscribeMarginOffersRequest) returns (stream SubscribeMarginOffersResponse);
 }

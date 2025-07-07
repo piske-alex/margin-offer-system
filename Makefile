@@ -27,7 +27,7 @@ test-coverage:
 proto-gen:
 	@echo "Generating protobuf files..."
 	mkdir -p proto/gen/go
-	protoc --go_out=proto/gen/go --go_opt=paths=source_relative \
+	PATH=$$PATH:$$(go env GOPATH)/bin protoc --go_out=proto/gen/go --go_opt=paths=source_relative \
 	       --go-grpc_out=proto/gen/go --go-grpc_opt=paths=source_relative \
 	       proto/*.proto
 
@@ -42,11 +42,19 @@ run-etl:
 
 run-backfiller:
 	@echo "Running backfiller..."
-	go run cmd/backfillers/main.go
+	go run cmd/backfillers/main.go --store-addr localhost:8080 --source chain
 
 run-backfiller-once:
 	@echo "Running one-time backfill..."
 	go run cmd/backfillers/main.go -run-once -hours 24
+
+run-marginfi:
+	@echo "Running MarginFi sync service..."
+	cd backfillers/marginfi && npm start
+
+run-marginfi-dev:
+	@echo "Running MarginFi sync service in development mode..."
+	cd backfillers/marginfi && npm run dev
 
 # Development targets
 dev-setup:
@@ -54,6 +62,8 @@ dev-setup:
 	go mod tidy
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+	@echo "Setting up MarginFi service dependencies..."
+	cd backfillers/marginfi && npm install
 
 dev-run-all:
 	@echo "Starting all services in development mode..."

@@ -26,12 +26,12 @@ func NewSolanaClient(logger types.Logger) types.ChainClient {
 func (s *SolanaClient) Connect(ctx context.Context, endpoint string) error {
 	s.endpoint = endpoint
 	s.logger.Info("Connecting to Solana RPC", "endpoint", endpoint)
-	
+
 	// In a real implementation, this would establish WebSocket connection
 	// For now, just simulate connection
 	time.Sleep(time.Millisecond * 100)
 	s.connected = true
-	
+
 	s.logger.Info("Connected to Solana RPC successfully")
 	return nil
 }
@@ -53,15 +53,15 @@ func (s *SolanaClient) SubscribeToMarginOfferEvents(ctx context.Context, callbac
 	if !s.connected {
 		return fmt.Errorf("not connected to chain")
 	}
-	
+
 	s.logger.Info("Subscribing to margin offer events")
-	
+
 	// In a real implementation, this would set up WebSocket subscriptions
 	// For now, simulate with a goroutine that generates mock events
 	go func() {
 		ticker := time.NewTicker(time.Second * 30)
 		defer ticker.Stop()
-		
+
 		for {
 			select {
 			case <-ticker.C:
@@ -82,7 +82,7 @@ func (s *SolanaClient) SubscribeToMarginOfferEvents(ctx context.Context, callbac
 			}
 		}
 	}()
-	
+
 	return nil
 }
 
@@ -91,14 +91,14 @@ func (s *SolanaClient) SubscribeToLiquidityEvents(ctx context.Context, callback 
 	if !s.connected {
 		return fmt.Errorf("not connected to chain")
 	}
-	
+
 	s.logger.Info("Subscribing to liquidity events")
-	
+
 	// Similar mock implementation
 	go func() {
 		ticker := time.NewTicker(time.Second * 45)
 		defer ticker.Stop()
-		
+
 		for {
 			select {
 			case <-ticker.C:
@@ -121,7 +121,7 @@ func (s *SolanaClient) SubscribeToLiquidityEvents(ctx context.Context, callback 
 			}
 		}
 	}()
-	
+
 	return nil
 }
 
@@ -136,10 +136,10 @@ func (s *SolanaClient) GetMarginOffersByBlock(ctx context.Context, blockNumber u
 	if !s.connected {
 		return nil, fmt.Errorf("not connected to chain")
 	}
-	
+
 	// Mock implementation - would query Solana RPC in real implementation
 	s.logger.Debug("Fetching margin offers for block", "block_number", blockNumber)
-	
+
 	// Return empty slice for now
 	return []*types.MarginOffer{}, nil
 }
@@ -149,7 +149,7 @@ func (s *SolanaClient) GetLatestBlock(ctx context.Context) (uint64, error) {
 	if !s.connected {
 		return 0, fmt.Errorf("not connected to chain")
 	}
-	
+
 	// Mock latest block number
 	return 250000000, nil
 }
@@ -159,7 +159,27 @@ func (s *SolanaClient) GetBlockTimestamp(ctx context.Context, blockNumber uint64
 	if !s.connected {
 		return time.Time{}, fmt.Errorf("not connected to chain")
 	}
-	
+
 	// Mock timestamp
 	return time.Now().UTC(), nil
+}
+
+// GetProgramAccounts retrieves all accounts for a given program
+func (s *SolanaClient) GetProgramAccounts(ctx context.Context, programID string, filters map[string]interface{}) ([]types.ProgramAccount, error) {
+	if !s.connected {
+		return nil, fmt.Errorf("not connected to chain")
+	}
+
+	s.logger.Info("Fetching program accounts", "program_id", programID)
+
+	// Mock implementation - would call Solana RPC getProgramAccounts in real implementation
+	// For now, return empty slice
+	return []types.ProgramAccount{}, nil
+}
+
+// DecodeBase64 decodes base64 encoded data
+func (s *SolanaClient) DecodeBase64(data string) ([]byte, error) {
+	// In a real implementation, this would use base64.StdEncoding.DecodeString
+	// For now, return empty bytes
+	return []byte{}, nil
 }

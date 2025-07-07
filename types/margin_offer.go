@@ -23,21 +23,22 @@ const (
 
 // MarginOffer represents a margin lending offer
 type MarginOffer struct {
-	ID                      string        `json:"id" bson:"_id"`
-	OfferType              OfferType     `json:"offer_type" bson:"offer_type"`
-	CollateralToken        string        `json:"collateral_token" bson:"collateral_token"`
-	BorrowToken            string        `json:"borrow_token" bson:"borrow_token"`
-	AvailableBorrowAmount  float64       `json:"available_borrow_amount" bson:"available_borrow_amount"`
-	MaxOpenLTV             float64       `json:"max_open_ltv" bson:"max_open_ltv"`
-	LiquidationLTV         float64       `json:"liquidation_ltv" bson:"liquidation_ltv"`
-	InterestRate           float64       `json:"interest_rate" bson:"interest_rate"`
-	InterestModel          InterestModel `json:"interest_model" bson:"interest_model"`
-	TermDays               *int32        `json:"term_days,omitempty" bson:"term_days,omitempty"`
-	LiquiditySource        string        `json:"liquidity_source" bson:"liquidity_source"`
-	LenderAddress          *string       `json:"lender_address,omitempty" bson:"lender_address,omitempty"`
-	LastBorrowedTimestamp  *time.Time    `json:"last_borrowed_timestamp,omitempty" bson:"last_borrowed_timestamp,omitempty"`
-	CreatedTimestamp       time.Time     `json:"created_timestamp" bson:"created_timestamp"`
-	UpdatedTimestamp       time.Time     `json:"updated_timestamp" bson:"updated_timestamp"`
+	ID                    string        `json:"id" bson:"_id"`
+	OfferType             OfferType     `json:"offer_type" bson:"offer_type"`
+	CollateralToken       string        `json:"collateral_token" bson:"collateral_token"`
+	BorrowToken           string        `json:"borrow_token" bson:"borrow_token"`
+	AvailableBorrowAmount float64       `json:"available_borrow_amount" bson:"available_borrow_amount"`
+	MaxOpenLTV            float64       `json:"max_open_ltv" bson:"max_open_ltv"`
+	LiquidationLTV        float64       `json:"liquidation_ltv" bson:"liquidation_ltv"`
+	InterestRate          float64       `json:"interest_rate" bson:"interest_rate"`
+	InterestModel         InterestModel `json:"interest_model" bson:"interest_model"`
+	TermDays              *int32        `json:"term_days,omitempty" bson:"term_days,omitempty"`
+	LiquiditySource       string        `json:"liquidity_source" bson:"liquidity_source"`
+	LenderAddress         *string       `json:"lender_address,omitempty" bson:"lender_address,omitempty"`
+	LastBorrowedTimestamp *time.Time    `json:"last_borrowed_timestamp,omitempty" bson:"last_borrowed_timestamp,omitempty"`
+	CreatedTimestamp      time.Time     `json:"created_timestamp" bson:"created_timestamp"`
+	UpdatedTimestamp      time.Time     `json:"updated_timestamp" bson:"updated_timestamp"`
+	Source                *string       `json:"source,omitempty" bson:"source,omitempty"`
 }
 
 // Validate performs basic validation on the MarginOffer
@@ -105,6 +106,10 @@ func (mo *MarginOffer) Clone() *MarginOffer {
 	if mo.LastBorrowedTimestamp != nil {
 		lastBorrowed := *mo.LastBorrowedTimestamp
 		clone.LastBorrowedTimestamp = &lastBorrowed
+	}
+	if mo.Source != nil {
+		source := *mo.Source
+		clone.Source = &source
 	}
 	return &clone
 }

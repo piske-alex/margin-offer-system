@@ -12,7 +12,7 @@ func (ms *MemoryStore) BulkCreate(ctx context.Context, offers []*types.MarginOff
 	if len(offers) == 0 {
 		return nil
 	}
-	
+
 	// Validate all offers first
 	for i, offer := range offers {
 		if offer == nil {
@@ -28,32 +28,32 @@ func (ms *MemoryStore) BulkCreate(ctx context.Context, offers []*types.MarginOff
 			}
 		}
 	}
-	
+
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
-	
+
 	// Check for existing offers
 	for _, offer := range offers {
 		if _, exists := ms.offers[offer.ID]; exists {
 			return types.ErrOfferAlreadyExists
 		}
 	}
-	
+
 	now := time.Now().UTC()
-	
+
 	// Add all offers
 	for _, offer := range offers {
 		// Set timestamps
 		offer.CreatedTimestamp = now
 		offer.UpdatedTimestamp = now
-		
+
 		// Store the offer
 		ms.offers[offer.ID] = offer.Clone()
-		
+
 		// Update indexes
 		ms.addToIndexes(offer)
 	}
-	
+
 	ms.lastUpdate = now
 	return nil
 }
@@ -63,7 +63,7 @@ func (ms *MemoryStore) BulkUpdate(ctx context.Context, offers []*types.MarginOff
 	if len(offers) == 0 {
 		return nil
 	}
-	
+
 	// Validate all offers first
 	for _, offer := range offers {
 		if offer == nil {
@@ -73,10 +73,10 @@ func (ms *MemoryStore) BulkUpdate(ctx context.Context, offers []*types.MarginOff
 			return err
 		}
 	}
-	
+
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
-	
+
 	// Check that all offers exist
 	oldOffers := make([]*types.MarginOffer, len(offers))
 	for i, offer := range offers {
@@ -86,25 +86,25 @@ func (ms *MemoryStore) BulkUpdate(ctx context.Context, offers []*types.MarginOff
 		}
 		oldOffers[i] = oldOffer
 	}
-	
+
 	now := time.Now().UTC()
-	
+
 	// Update all offers
 	for i, offer := range offers {
 		// Remove from old indexes
 		ms.removeFromIndexes(oldOffers[i])
-		
+
 		// Preserve creation timestamp and update timestamp
 		offer.CreatedTimestamp = oldOffers[i].CreatedTimestamp
 		offer.UpdatedTimestamp = now
-		
+
 		// Store the updated offer
 		ms.offers[offer.ID] = offer.Clone()
-		
+
 		// Add to new indexes
 		ms.addToIndexes(offer)
 	}
-	
+
 	ms.lastUpdate = now
 	return nil
 }
@@ -114,10 +114,10 @@ func (ms *MemoryStore) BulkDelete(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	
+
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
-	
+
 	// Check that all offers exist and collect them
 	offersToDelete := make([]*types.MarginOffer, len(ids))
 	for i, id := range ids {
@@ -130,16 +130,16 @@ func (ms *MemoryStore) BulkDelete(ctx context.Context, ids []string) error {
 		}
 		offersToDelete[i] = offer
 	}
-	
+
 	// Delete all offers
 	for i, id := range ids {
 		// Remove from indexes
 		ms.removeFromIndexes(offersToDelete[i])
-		
+
 		// Delete from main storage
 		delete(ms.offers, id)
 	}
-	
+
 	ms.lastUpdate = time.Now().UTC()
 	return nil
 }
@@ -148,7 +148,7 @@ func (ms *MemoryStore) BulkDelete(ctx context.Context, ids []string) error {
 func (ms *MemoryStore) Count(ctx context.Context) (int64, error) {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
-	
+
 	return int64(len(ms.offers)), nil
 }
 
@@ -156,26 +156,26 @@ func (ms *MemoryStore) Count(ctx context.Context) (int64, error) {
 func (ms *MemoryStore) CountByOfferType(ctx context.Context, offerType types.OfferType) (int64, error) {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
-	
+
 	ids, exists := ms.offerTypeIndex[offerType]
 	if !exists {
 		return 0, nil
 	}
-	
+
 	return int64(len(ids)), nil
 }
 
-// GetTotalLiquidity returns the total available liquidity for a given borrow token
-func (ms *MemoryStore) GetTotalLiquidity(ctx context.Context, borrowToken string) (float64, error) {
-	ms.mu.RLock()
-	defer ms.mu.RUnlock()
-	
+// GetTotalLiquidity calculates the total liquidity for a specific borrow token
+func (s *MemoryStore) GetTotalLiquidity(ctx context.Context, borrowToken string) (float64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	var totalLiquidity float64
-	for _, offer := range ms.offers {
-		if offer.BorrowToken == borrowToken && !offer.IsExpired() {
+	for _, offer := range s.offers {
+		if offer.BorrowToken == borrowToken {
 			totalLiquidity += offer.AvailableBorrowAmount
 		}
 	}
-	
+
 	return totalLiquidity, nil
 }

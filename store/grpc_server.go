@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -12,8 +11,8 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	pb "github.com/piske-alex/margin-offer-system/proto/gen/go/proto"
 	"github.com/piske-alex/margin-offer-system/types"
-	pb "github.com/piske-alex/margin-offer-system/proto/gen/go"
 )
 
 // GRPCServer implements the MarginOfferService gRPC interface
@@ -187,9 +186,7 @@ func (s *GRPCServer) BulkCreateMarginOffers(ctx context.Context, req *pb.BulkCre
 		offers[i] = offer
 	}
 
-	start := time.Now()
 	err := s.store.BulkCreate(ctx, offers)
-	duration := time.Since(start)
 
 	if err != nil {
 		return &pb.BulkOperationResponse{
@@ -211,6 +208,243 @@ func (s *GRPCServer) BulkCreateMarginOffers(ctx context.Context, req *pb.BulkCre
 		SuccessCount: int32(len(offers)),
 		FailureCount: 0,
 		ProcessedIds: processedIDs,
+	}, nil
+}
+
+// CreateOrUpdateMarginOffer creates or updates a margin offer (upsert)
+func (s *GRPCServer) CreateOrUpdateMarginOffer(ctx context.Context, req *pb.CreateOrUpdateMarginOfferRequest) (*pb.CreateOrUpdateMarginOfferResponse, error) {
+	if req.Offer == nil {
+		return nil, status.Error(codes.InvalidArgument, "offer is required")
+	}
+
+	offer, err := s.protoToMarginOffer(req.Offer)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	// Check if offer exists to determine if it's a create or update
+	_, err = s.store.GetByID(ctx, offer.ID)
+	wasCreated := false
+
+	if err != nil {
+		if err == types.ErrOfferNotFound {
+			// Offer doesn't exist, create it
+			if err := s.store.Create(ctx, offer); err != nil {
+				return nil, s.handleStoreError(err)
+			}
+			wasCreated = true
+		} else {
+			return nil, s.handleStoreError(err)
+		}
+	} else {
+		// Offer exists, update it
+		if err := s.store.Update(ctx, offer); err != nil {
+			return nil, s.handleStoreError(err)
+		}
+		wasCreated = false
+	}
+
+	protoOffer, err := s.marginOfferToProto(offer)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to convert offer")
+	}
+
+	return &pb.CreateOrUpdateMarginOfferResponse{
+		Offer:      protoOffer,
+		WasCreated: wasCreated,
+	}, nil
+}
+
+// BulkUpdateMarginOffers updates multiple margin offers
+func (s *GRPCServer) BulkUpdateMarginOffers(ctx context.Context, req *pb.BulkUpdateMarginOffersRequest) (*pb.BulkOperationResponse, error) {
+	if len(req.Offers) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "offers are required")
+	}
+
+	offers := make([]*types.MarginOffer, len(req.Offers))
+	for i, protoOffer := range req.Offers {
+		offer, err := s.protoToMarginOffer(protoOffer)
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("invalid offer at index %d: %v", i, err))
+		}
+		offers[i] = offer
+	}
+
+	err := s.store.BulkUpdate(ctx, offers)
+	if err != nil {
+		return &pb.BulkOperationResponse{
+			SuccessCount: 0,
+			FailureCount: int32(len(offers)),
+			Errors: []*pb.BulkError{{
+				Index: 0,
+				Error: err.Error(),
+			}},
+		}, nil
+	}
+
+	processedIDs := make([]string, len(offers))
+	for i, offer := range offers {
+		processedIDs[i] = offer.ID
+	}
+
+	return &pb.BulkOperationResponse{
+		SuccessCount: int32(len(offers)),
+		FailureCount: 0,
+		ProcessedIds: processedIDs,
+	}, nil
+}
+
+// BulkDeleteMarginOffers deletes multiple margin offers
+func (s *GRPCServer) BulkDeleteMarginOffers(ctx context.Context, req *pb.BulkDeleteMarginOffersRequest) (*pb.BulkOperationResponse, error) {
+	if len(req.Ids) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "ids are required")
+	}
+
+	err := s.store.BulkDelete(ctx, req.Ids)
+	if err != nil {
+		return &pb.BulkOperationResponse{
+			SuccessCount: 0,
+			FailureCount: int32(len(req.Ids)),
+			Errors: []*pb.BulkError{{
+				Index: 0,
+				Error: err.Error(),
+			}},
+		}, nil
+	}
+
+	return &pb.BulkOperationResponse{
+		SuccessCount: int32(len(req.Ids)),
+		FailureCount: 0,
+		ProcessedIds: req.Ids,
+	}, nil
+}
+
+// BulkCreateOrUpdateMarginOffers creates or updates multiple margin offers (bulk upsert)
+func (s *GRPCServer) BulkCreateOrUpdateMarginOffers(ctx context.Context, req *pb.BulkCreateOrUpdateMarginOffersRequest) (*pb.BulkOperationResponse, error) {
+	if len(req.Offers) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "offers are required")
+	}
+
+	offers := make([]*types.MarginOffer, len(req.Offers))
+	for i, protoOffer := range req.Offers {
+		offer, err := s.protoToMarginOffer(protoOffer)
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("invalid offer at index %d: %v", i, err))
+		}
+		offers[i] = offer
+	}
+
+	err := s.store.BulkCreateOrUpdate(ctx, offers)
+	if err != nil {
+		return &pb.BulkOperationResponse{
+			SuccessCount: 0,
+			FailureCount: int32(len(offers)),
+			Errors: []*pb.BulkError{{
+				Index: 0,
+				Error: err.Error(),
+			}},
+		}, nil
+	}
+
+	processedIDs := make([]string, len(offers))
+	for i, offer := range offers {
+		processedIDs[i] = offer.ID
+	}
+
+	return &pb.BulkOperationResponse{
+		SuccessCount: int32(len(offers)),
+		FailureCount: 0,
+		ProcessedIds: processedIDs,
+	}, nil
+}
+
+// BulkOverwriteMarginOffers overwrites margin offers based on filter
+func (s *GRPCServer) BulkOverwriteMarginOffers(ctx context.Context, req *pb.BulkOverwriteMarginOffersRequest) (*pb.BulkOverwriteResponse, error) {
+	if len(req.Offers) == 0 && req.Filter == nil {
+		return nil, status.Error(codes.InvalidArgument, "either offers or filter must be provided")
+	}
+
+	offers := make([]*types.MarginOffer, len(req.Offers))
+	for i, protoOffer := range req.Offers {
+		offer, err := s.protoToMarginOffer(protoOffer)
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("invalid offer at index %d: %v", i, err))
+		}
+		offers[i] = offer
+	}
+
+	// Convert filter if provided
+	var filter *types.OverwriteFilter
+	if req.Filter != nil {
+		var err error
+		filter, err = s.protoToOverwriteFilter(req.Filter)
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("invalid filter: %v", err))
+		}
+	}
+
+	// Get stats before overwrite for preview
+	var deletedCount int64
+	var deletedIDs []string
+	var err error
+	if filter != nil {
+		deletedCount, err = s.store.GetOverwriteStats(ctx, filter)
+		if err != nil {
+			return nil, s.handleStoreError(err)
+		}
+		// Note: In a real implementation, you might want to get the actual IDs that would be deleted
+		// For now, we'll just use the count
+	}
+
+	// Perform the overwrite
+	if filter != nil {
+		err := s.store.BulkOverwriteByFilter(ctx, offers, filter)
+		if err != nil {
+			return nil, s.handleStoreError(err)
+		}
+	} else {
+		err := s.store.BulkOverwrite(ctx, offers)
+		if err != nil {
+			return nil, s.handleStoreError(err)
+		}
+	}
+
+	createdIDs := make([]string, len(offers))
+	for i, offer := range offers {
+		createdIDs[i] = offer.ID
+	}
+
+	return &pb.BulkOverwriteResponse{
+		DeletedCount: int32(deletedCount),
+		CreatedCount: int32(len(offers)),
+		DeletedIds:   deletedIDs,
+		CreatedIds:   createdIDs,
+	}, nil
+}
+
+// OverwritePreview previews what would be affected by an overwrite operation
+func (s *GRPCServer) OverwritePreview(ctx context.Context, req *pb.OverwritePreviewRequest) (*pb.OverwritePreviewResponse, error) {
+	var filter *types.OverwriteFilter
+	if req.Filter != nil {
+		var err error
+		filter, err = s.protoToOverwriteFilter(req.Filter)
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("invalid filter: %v", err))
+		}
+	}
+
+	affectedCount, err := s.store.GetOverwriteStats(ctx, filter)
+	if err != nil {
+		return nil, s.handleStoreError(err)
+	}
+
+	// Note: In a real implementation, you might want to get the actual IDs that would be affected
+	// For now, we'll just return the count
+	var affectedIDs []string
+
+	return &pb.OverwritePreviewResponse{
+		AffectedCount: int32(affectedCount),
+		AffectedIds:   affectedIDs,
 	}, nil
 }
 
@@ -245,5 +479,53 @@ func (s *GRPCServer) handleStoreError(err error) error {
 		return status.Error(codes.InvalidArgument, err.Error())
 	default:
 		return status.Error(codes.Internal, err.Error())
+	}
+}
+
+// SubscribeMarginOffers implements the subscription service
+func (s *GRPCServer) SubscribeMarginOffers(req *pb.SubscribeMarginOffersRequest, stream pb.MarginOfferService_SubscribeMarginOffersServer) error {
+	// Get the notification service from the store
+	memoryStore, ok := s.store.(*MemoryStore)
+	if !ok {
+		return status.Errorf(codes.Internal, "store does not support notifications")
+	}
+
+	// Create subscription
+	subscription, err := memoryStore.notificationService.Subscribe(req)
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to create subscription: %v", err)
+	}
+	defer memoryStore.notificationService.Unsubscribe(subscription.ID)
+
+	// Send initial confirmation
+	initialResponse := &pb.SubscribeMarginOffersResponse{
+		Event: &pb.SubscribeMarginOffersResponse_Change{
+			Change: &pb.MarginOfferChange{
+				ChangeType:  pb.MarginOfferChange_UNKNOWN,
+				Timestamp:   timestamppb.Now(),
+				Source:      "subscription_service",
+				OperationId: subscription.ID,
+				Metadata: map[string]string{
+					"message":   "subscription_established",
+					"client_id": subscription.ClientID,
+				},
+			},
+		},
+	}
+
+	if err := stream.Send(initialResponse); err != nil {
+		return status.Errorf(codes.Internal, "failed to send initial response: %v", err)
+	}
+
+	// Stream notifications
+	for {
+		select {
+		case response := <-subscription.Channel:
+			if err := stream.Send(response); err != nil {
+				return status.Errorf(codes.Internal, "failed to send notification: %v", err)
+			}
+		case <-stream.Context().Done():
+			return status.Error(codes.Canceled, "client disconnected")
+		}
 	}
 }

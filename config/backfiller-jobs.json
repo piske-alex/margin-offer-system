@@ -1,0 +1,101 @@
+{
+  "default_interval": "6h",
+  "jobs": [
+    {
+      "name": "chain-backfill",
+      "description": "Default blockchain backfill for marginfi and leverage programs",
+      "enabled": true,
+      "request": {
+        "source": "chain",
+        "batch_size": 1000,
+        "chain_params": {
+          "programs": ["marginfi", "leverage"],
+          "network": "mainnet"
+        }
+      },
+      "max_retries": 3,
+      "timeout": "1h"
+    },
+    {
+      "name": "glacier-backfill",
+      "description": "AWS Glacier archive retrieval",
+      "enabled": true,
+      "request": {
+        "source": "glacier",
+        "batch_size": 500,
+        "glacier_params": {
+          "vault_name": "margin-offers-archive",
+          "retrieval": true
+        }
+      },
+      "max_retries": 3,
+      "timeout": "1h"
+    },
+    {
+      "name": "off-chain-api",
+      "description": "External API data backfill",
+      "enabled": false,
+      "request": {
+        "source": "off-chain",
+        "batch_size": 1000,
+        "off_chain_params": {
+          "api_endpoint": "https://api.example.com/margin-offers",
+          "headers": {
+            "Authorization": "Bearer ${API_TOKEN}",
+            "Content-Type": "application/json"
+          }
+        }
+      },
+      "max_retries": 3,
+      "timeout": "30m"
+    },
+    {
+      "name": "daily-leverage-sync",
+      "description": "Daily full sync of leverage program",
+      "enabled": true,
+      "schedule": "0 2 * * *",
+      "request": {
+        "source": "chain",
+        "batch_size": 2000,
+        "chain_params": {
+          "programs": ["CRSeeBqjDnm3UPefJ9gxrtngTsnQRhEJiTA345Q83X3v"],
+          "network": "mainnet"
+        }
+      },
+      "max_retries": 3,
+      "timeout": "2h"
+    },
+    {
+      "name": "hourly-quick-sync",
+      "description": "Hourly quick sync for recent changes",
+      "enabled": true,
+      "schedule": "0 * * * *",
+      "request": {
+        "source": "chain",
+        "batch_size": 500,
+        "chain_params": {
+          "programs": ["leverage"],
+          "network": "mainnet"
+        }
+      },
+      "max_retries": 2,
+      "timeout": "30m"
+    },
+    {
+      "name": "weekly-full-sync",
+      "description": "Weekly comprehensive sync of all programs",
+      "enabled": true,
+      "schedule": "0 3 * * 0",
+      "request": {
+        "source": "chain",
+        "batch_size": 3000,
+        "chain_params": {
+          "programs": ["marginfi", "leverage", "CRSeeBqjDnm3UPefJ9gxrtngTsnQRhEJiTA345Q83X3v"],
+          "network": "mainnet"
+        }
+      },
+      "max_retries": 5,
+      "timeout": "4h"
+    }
+  ]
+} 

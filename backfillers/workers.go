@@ -10,7 +10,7 @@ import (
 // worker processes backfill jobs from the queue
 func (b *Backfiller) worker(ctx context.Context, workerID int) {
 	b.logger.Info("Starting backfill worker", "worker_id", workerID)
-	
+
 	for {
 		select {
 		case job := <-b.jobQueue:
@@ -27,44 +27,44 @@ func (b *Backfiller) worker(ctx context.Context, workerID int) {
 // processJob executes a single backfill job
 func (b *Backfiller) processJob(ctx context.Context, job *backfillJob) {
 	start := time.Now()
-	
+
 	// Create progress tracking
 	progress := &types.BackfillProgress{
 		JobID:     job.id,
 		Status:    "running",
 		StartTime: start,
 	}
-	
+
 	b.mu.Lock()
 	b.activeJobs[job.id] = progress
 	b.mu.Unlock()
-	
+
 	defer func() {
 		b.mu.Lock()
 		delete(b.activeJobs, job.id)
 		b.mu.Unlock()
 	}()
-	
+
 	b.logger.Info("Processing backfill job", "job_id", job.id, "source", job.request.Source)
-	
+
 	// Execute backfill based on source
 	var err error
 	switch job.request.Source {
 	case "chain":
 		err = b.processChainBackfill(ctx, job.request, progress)
-	case "glacier":
-		err = b.processGlacierBackfill(ctx, job.request, progress)
-	case "off-chain":
-		err = b.processOffChainBackfill(ctx, job.request, progress)
+	// case "glacier":
+	// 	err = b.processGlacierBackfill(ctx, job.request, progress)
+	// case "off-chain":
+	// 	err = b.processOffChainBackfill(ctx, job.request, progress)
 	default:
 		err = types.ErrBackfillSourceUnavailable
 	}
-	
+
 	// Update progress
 	now := time.Now()
 	progress.EndTime = &now
 	progress.Progress = 1.0
-	
+
 	if err != nil {
 		progress.Status = "failed"
 		progress.Errors = append(progress.Errors, err.Error())
@@ -79,7 +79,7 @@ func (b *Backfiller) processJob(ctx context.Context, job *backfillJob) {
 		b.mu.Unlock()
 		b.logger.Info("Backfill job completed", "job_id", job.id)
 	}
-	
+
 	// Send result
 	select {
 	case job.result <- err:
@@ -93,64 +93,73 @@ func (b *Backfiller) processChainBackfill(ctx context.Context, req *types.Backfi
 	if req.ChainParams == nil {
 		return types.ErrInvalidBackfillRange
 	}
-	
-	// Fetch data from blockchain
-	offers, err := b.FetchFromChain(ctx, req.ChainParams.StartBlock, req.ChainParams.EndBlock)
+
+	// Fetch pools from blockchain
+	pools, err := b.FetchAllPools(ctx, "CRSeeBqjDnm3UPefJ9gxrtngTsnQRhEJiTA345Q83X3v")
 	if err != nil {
 		return err
 	}
-	
+
+	// Convert pools to margin offers
+	var offers []*types.MarginOffer
+	for _, pool := range pools {
+		marginOffer := pool.ToMarginOffer()
+		if marginOffer != nil {
+			offers = append(offers, marginOffer)
+		}
+	}
+
 	progress.TotalRecords = int64(len(offers))
-	
-	// Process in batches using BulkCreateOrUpdate for consolidated logic
+
+	// Process in batches using BulkOverwrite since backfillers are the source of truth
 	batchSize := int(req.BatchSize)
 	for i := 0; i < len(offers); i += batchSize {
 		end := i + batchSize
 		if end > len(offers) {
 			end = len(offers)
 		}
-		
+
 		batch := offers[i:end]
-		
+
 		if req.DryRun {
 			b.logger.Info("Dry run: would process batch", "size", len(batch))
 		} else {
-			// Use BulkCreateOrUpdate instead of separate create/update logic
-			if err := b.store.BulkCreateOrUpdate(ctx, batch); err != nil {
+			// Use BulkOverwrite to completely replace the store with fresh data
+			if err := b.store.BulkOverwrite(ctx, batch); err != nil {
 				progress.FailedRecords += int64(len(batch))
 				b.logger.Warn("Failed to process batch", "error", err, "batch_size", len(batch))
 				continue
 			}
 		}
-		
+
 		progress.ProcessedRecords += int64(len(batch))
 		progress.SuccessRecords += int64(len(batch))
 		progress.CurrentBatch++
 		progress.Progress = float64(progress.ProcessedRecords) / float64(progress.TotalRecords)
-		
+
 		// Calculate throughput
 		elapsed := time.Since(progress.StartTime)
 		if elapsed > 0 {
 			progress.Throughput = float64(progress.ProcessedRecords) / elapsed.Seconds()
 		}
-		
+
 		// Estimate remaining time
 		if progress.Throughput > 0 {
 			remainingRecords := progress.TotalRecords - progress.ProcessedRecords
 			progress.RemainingTime = time.Duration(float64(remainingRecords)/progress.Throughput) * time.Second
 		}
-		
+
 		// Check for cancellation
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-		
+
 		// Rate limiting
 		time.Sleep(time.Millisecond * 50)
 	}
-	
+
 	return nil
 }
 
@@ -159,26 +168,26 @@ func (b *Backfiller) processGlacierBackfill(ctx context.Context, req *types.Back
 	if req.GlacierParams == nil {
 		return types.ErrInvalidBackfillRange
 	}
-	
+
 	// Fetch data from Glacier
 	offers, err := b.FetchFromGlacier(ctx, req.StartTime, req.EndTime)
 	if err != nil {
 		return err
 	}
-	
+
 	progress.TotalRecords = int64(len(offers))
-	
-	// Process offers using BulkCreateOrUpdate
+
+	// Process offers using BulkOverwrite since backfillers are the source of truth
 	if !req.DryRun && len(offers) > 0 {
-		if err := b.store.BulkCreateOrUpdate(ctx, offers); err != nil {
+		if err := b.store.BulkOverwrite(ctx, offers); err != nil {
 			return err
 		}
 	}
-	
+
 	progress.ProcessedRecords = int64(len(offers))
 	progress.SuccessRecords = int64(len(offers))
 	progress.Progress = 1.0
-	
+
 	return nil
 }
 
@@ -187,26 +196,26 @@ func (b *Backfiller) processOffChainBackfill(ctx context.Context, req *types.Bac
 	if req.OffChainParams == nil {
 		return types.ErrInvalidBackfillRange
 	}
-	
+
 	// Fetch data from off-chain source
 	offers, err := b.FetchFromOffChain(ctx, req.OffChainParams.APIEndpoint)
 	if err != nil {
 		return err
 	}
-	
+
 	progress.TotalRecords = int64(len(offers))
-	
-	// Process offers using BulkCreateOrUpdate
+
+	// Process offers using BulkOverwrite since backfillers are the source of truth
 	if !req.DryRun && len(offers) > 0 {
-		if err := b.store.BulkCreateOrUpdate(ctx, offers); err != nil {
+		if err := b.store.BulkOverwrite(ctx, offers); err != nil {
 			return err
 		}
 	}
-	
+
 	progress.ProcessedRecords = int64(len(offers))
 	progress.SuccessRecords = int64(len(offers))
 	progress.Progress = 1.0
-	
+
 	return nil
 }
 
@@ -215,7 +224,7 @@ func (b *Backfiller) processOverwriteBackfill(ctx context.Context, req *types.Ba
 	// Fetch data based on source
 	var offers []*types.MarginOffer
 	var err error
-	
+
 	switch req.Source {
 	case "chain":
 		if req.ChainParams == nil {
@@ -232,35 +241,35 @@ func (b *Backfiller) processOverwriteBackfill(ctx context.Context, req *types.Ba
 	default:
 		return types.ErrBackfillSourceUnavailable
 	}
-	
+
 	if err != nil {
 		return err
 	}
-	
+
 	progress.TotalRecords = int64(len(offers))
-	
+
 	// Preview what would be overwritten
 	affectedCount, err := b.store.GetOverwriteStats(ctx, filter)
 	if err != nil {
 		return err
 	}
-	
-	b.logger.Info("Overwrite backfill preview", 
+
+	b.logger.Info("Overwrite backfill preview",
 		"job_id", progress.JobID,
 		"new_records", len(offers),
 		"affected_records", affectedCount)
-	
+
 	// Perform the overwrite operation
 	if !req.DryRun {
 		if err := b.store.BulkOverwriteByFilter(ctx, offers, filter); err != nil {
 			return err
 		}
 	}
-	
+
 	progress.ProcessedRecords = int64(len(offers))
 	progress.SuccessRecords = int64(len(offers))
 	progress.Progress = 1.0
-	
+
 	return nil
 }
 
@@ -268,7 +277,7 @@ func (b *Backfiller) processOverwriteBackfill(ctx context.Context, req *types.Ba
 func (b *Backfiller) scheduler(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute * 5) // Check every 5 minutes
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
@@ -289,13 +298,13 @@ func (b *Backfiller) checkScheduledJobs(ctx context.Context) {
 		scheduledJobs[k] = v
 	}
 	b.mu.RUnlock()
-	
+
 	now := time.Now()
 	for name, job := range scheduledJobs {
 		if !job.Enabled {
 			continue
 		}
-		
+
 		// Simple time-based scheduling (would use cron parser in real implementation)
 		if b.shouldRunScheduledJob(job, now) {
 			b.logger.Info("Running scheduled backfill job", "name", name)
@@ -318,7 +327,7 @@ func (b *Backfiller) shouldRunScheduledJob(job *types.BackfillScheduleRequest, n
 func (b *Backfiller) cleanup(ctx context.Context) {
 	ticker := time.NewTicker(time.Hour) // Cleanup every hour
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
@@ -334,7 +343,7 @@ func (b *Backfiller) cleanup(ctx context.Context) {
 // performCleanup removes old data and performs maintenance tasks
 func (b *Backfiller) performCleanup() {
 	b.logger.Debug("Performing backfiller cleanup")
-	
+
 	// Clean up old active jobs (in case of crashes)
 	b.mu.Lock()
 	now := time.Now()
@@ -345,7 +354,7 @@ func (b *Backfiller) performCleanup() {
 		}
 	}
 	b.mu.Unlock()
-	
+
 	// Update metrics
 	b.metrics.SetGauge("backfill_active_jobs", float64(len(b.activeJobs)), nil)
 	b.metrics.SetGauge("backfill_completed_jobs", float64(b.completedJobs), nil)

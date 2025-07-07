@@ -7,11 +7,11 @@ type ListRequest struct {
 	// Pagination
 	Limit  int32 `json:"limit" validate:"min=1,max=1000"`
 	Offset int32 `json:"offset" validate:"min=0"`
-	
+
 	// Sorting
 	SortBy    string `json:"sort_by,omitempty"`
 	SortOrder string `json:"sort_order,omitempty"` // "asc" or "desc"
-	
+
 	// Filtering
 	OfferType       *OfferType     `json:"offer_type,omitempty"`
 	CollateralToken *string        `json:"collateral_token,omitempty"`
@@ -19,21 +19,22 @@ type ListRequest struct {
 	InterestModel   *InterestModel `json:"interest_model,omitempty"`
 	LiquiditySource *string        `json:"liquidity_source,omitempty"`
 	LenderAddress   *string        `json:"lender_address,omitempty"`
-	
+	Source          *string        `json:"source,omitempty"`
+
 	// Range filters
-	MinBorrowAmount   *float64 `json:"min_borrow_amount,omitempty"`
-	MaxBorrowAmount   *float64 `json:"max_borrow_amount,omitempty"`
-	MinInterestRate   *float64 `json:"min_interest_rate,omitempty"`
-	MaxInterestRate   *float64 `json:"max_interest_rate,omitempty"`
-	MinMaxOpenLTV     *float64 `json:"min_max_open_ltv,omitempty"`
-	MaxMaxOpenLTV     *float64 `json:"max_max_open_ltv,omitempty"`
-	
+	MinBorrowAmount *float64 `json:"min_borrow_amount,omitempty"`
+	MaxBorrowAmount *float64 `json:"max_borrow_amount,omitempty"`
+	MinInterestRate *float64 `json:"min_interest_rate,omitempty"`
+	MaxInterestRate *float64 `json:"max_interest_rate,omitempty"`
+	MinMaxOpenLTV   *float64 `json:"min_max_open_ltv,omitempty"`
+	MaxMaxOpenLTV   *float64 `json:"max_max_open_ltv,omitempty"`
+
 	// Time filters
 	CreatedAfter  *time.Time `json:"created_after,omitempty"`
 	CreatedBefore *time.Time `json:"created_before,omitempty"`
 	UpdatedAfter  *time.Time `json:"updated_after,omitempty"`
 	UpdatedBefore *time.Time `json:"updated_before,omitempty"`
-	
+
 	// Status filters
 	IncludeExpired bool `json:"include_expired"`
 	ActiveOnly     bool `json:"active_only"`
@@ -46,7 +47,7 @@ type BackfillRequest struct {
 	EndTime   time.Time `json:"end_time" validate:"required"`
 	BatchSize int32     `json:"batch_size" validate:"min=1,max=10000"`
 	DryRun    bool      `json:"dry_run"`
-	
+
 	// Source-specific parameters
 	ChainParams    *ChainBackfillParams    `json:"chain_params,omitempty"`
 	GlacierParams  *GlacierBackfillParams  `json:"glacier_params,omitempty"`
@@ -63,10 +64,10 @@ type ChainBackfillParams struct {
 
 // GlacierBackfillParams contains parameters for Glacier storage backfilling
 type GlacierBackfillParams struct {
-	VaultName   string `json:"vault_name"`
-	ArchiveID   string `json:"archive_id,omitempty"`
-	JobID       string `json:"job_id,omitempty"`
-	Retrieval   bool   `json:"retrieval"`
+	VaultName string `json:"vault_name"`
+	ArchiveID string `json:"archive_id,omitempty"`
+	JobID     string `json:"job_id,omitempty"`
+	Retrieval bool   `json:"retrieval"`
 }
 
 // OffChainBackfillParams contains parameters for off-chain data backfilling

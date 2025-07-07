@@ -4,30 +4,29 @@ import (
 	"context"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/piske-alex/margin-offer-system/types"
 )
 
 // processMarginOfferEvents processes margin offer events from the channel
 func (p *Processor) processMarginOfferEvents(ctx context.Context) {
 	p.logger.Info("Starting margin offer event processor")
-	
+
 	for {
 		select {
 		case event := <-p.marginOfferEvents:
 			start := time.Now()
 			result := p.ProcessMarginOfferEvent(ctx, event)
 			duration := time.Since(start)
-			
+
 			p.metrics.RecordDuration("event_processing_duration", duration, map[string]string{
-				"type": "margin_offer",
+				"type":   "margin_offer",
 				"status": p.getStatusString(result.Success),
 			})
-			
+
 			if !result.Success {
 				p.handleProcessingError(event, result.Error)
 			}
-			
+
 		case <-p.stopChan:
 			p.logger.Info("Stopping margin offer event processor")
 			return
@@ -40,23 +39,23 @@ func (p *Processor) processMarginOfferEvents(ctx context.Context) {
 // processLiquidityEvents processes liquidity events from the channel
 func (p *Processor) processLiquidityEvents(ctx context.Context) {
 	p.logger.Info("Starting liquidity event processor")
-	
+
 	for {
 		select {
 		case event := <-p.liquidityEvents:
 			start := time.Now()
 			result := p.ProcessLiquidityEvent(ctx, event)
 			duration := time.Since(start)
-			
+
 			p.metrics.RecordDuration("event_processing_duration", duration, map[string]string{
-				"type": "liquidity",
+				"type":   "liquidity",
 				"status": p.getStatusString(result.Success),
 			})
-			
+
 			if !result.Success {
 				p.handleLiquidityProcessingError(event, result.Error)
 			}
-			
+
 		case <-p.stopChan:
 			p.logger.Info("Stopping liquidity event processor")
 			return
@@ -69,23 +68,23 @@ func (p *Processor) processLiquidityEvents(ctx context.Context) {
 // processInterestRateEvents processes interest rate events from the channel
 func (p *Processor) processInterestRateEvents(ctx context.Context) {
 	p.logger.Info("Starting interest rate event processor")
-	
+
 	for {
 		select {
 		case event := <-p.interestEvents:
 			start := time.Now()
 			result := p.ProcessInterestRateEvent(ctx, event)
 			duration := time.Since(start)
-			
+
 			p.metrics.RecordDuration("event_processing_duration", duration, map[string]string{
-				"type": "interest_rate",
+				"type":   "interest_rate",
 				"status": p.getStatusString(result.Success),
 			})
-			
+
 			if !result.Success {
 				p.handleInterestRateProcessingError(event, result.Error)
 			}
-			
+
 		case <-p.stopChan:
 			p.logger.Info("Stopping interest rate event processor")
 			return
@@ -101,12 +100,12 @@ func (p *Processor) ProcessMarginOfferEvent(ctx context.Context, event *types.Ma
 		EventID:     event.GetEventKey(),
 		ProcessedAt: time.Now().UTC(),
 	}
-	
+
 	start := time.Now()
 	defer func() {
 		result.Duration = time.Since(start)
 	}()
-	
+
 	// Validate event
 	if err := event.Validate(); err != nil {
 		result.Success = false
@@ -114,7 +113,7 @@ func (p *Processor) ProcessMarginOfferEvent(ctx context.Context, event *types.Ma
 		p.metrics.IncCounter("events_validation_failed", map[string]string{"type": "margin_offer"})
 		return result
 	}
-	
+
 	// Process based on event type - use CreateOrUpdate for all events to consolidate logic
 	var err error
 	switch event.EventType {
@@ -128,7 +127,7 @@ func (p *Processor) ProcessMarginOfferEvent(ctx context.Context, event *types.Ma
 		err = types.ErrInvalidEventData
 		p.logger.Warn("Unknown margin offer event type", "type", event.EventType)
 	}
-	
+
 	if err != nil {
 		result.Success = false
 		result.Error = err.Error()
@@ -137,7 +136,7 @@ func (p *Processor) ProcessMarginOfferEvent(ctx context.Context, event *types.Ma
 		result.Success = true
 		p.metrics.IncCounter("events_processed_success", map[string]string{"type": "margin_offer"})
 	}
-	
+
 	return result
 }
 
@@ -147,12 +146,12 @@ func (p *Processor) ProcessLiquidityEvent(ctx context.Context, event *types.Liqu
 		EventID:     event.TransactionHash + "_" + event.OfferID,
 		ProcessedAt: time.Now().UTC(),
 	}
-	
+
 	start := time.Now()
 	defer func() {
 		result.Duration = time.Since(start)
 	}()
-	
+
 	// Get existing offer
 	offer, err := p.store.GetByID(ctx, event.OfferID)
 	if err != nil {
@@ -160,7 +159,7 @@ func (p *Processor) ProcessLiquidityEvent(ctx context.Context, event *types.Liqu
 		result.Error = err.Error()
 		return result
 	}
-	
+
 	// Update liquidity based on event type
 	switch event.EventType {
 	case types.EventTypeLiquidityAdded:
@@ -172,7 +171,7 @@ func (p *Processor) ProcessLiquidityEvent(ctx context.Context, event *types.Liqu
 		result.Error = "unknown liquidity event type"
 		return result
 	}
-	
+
 	// Use CreateOrUpdate to handle the update
 	if err := p.store.CreateOrUpdate(ctx, offer); err != nil {
 		result.Success = false
@@ -182,7 +181,7 @@ func (p *Processor) ProcessLiquidityEvent(ctx context.Context, event *types.Liqu
 		result.Success = true
 		p.metrics.IncCounter("events_processed_success", map[string]string{"type": "liquidity"})
 	}
-	
+
 	return result
 }
 
@@ -192,12 +191,12 @@ func (p *Processor) ProcessInterestRateEvent(ctx context.Context, event *types.I
 		EventID:     event.TransactionHash + "_" + event.OfferID,
 		ProcessedAt: time.Now().UTC(),
 	}
-	
+
 	start := time.Now()
 	defer func() {
 		result.Duration = time.Since(start)
 	}()
-	
+
 	// Get existing offer
 	offer, err := p.store.GetByID(ctx, event.OfferID)
 	if err != nil {
@@ -205,11 +204,11 @@ func (p *Processor) ProcessInterestRateEvent(ctx context.Context, event *types.I
 		result.Error = err.Error()
 		return result
 	}
-	
+
 	// Update interest rate
 	offer.InterestRate = event.NewRate
 	offer.InterestModel = event.RateModel
-	
+
 	// Use CreateOrUpdate to handle the update
 	if err := p.store.CreateOrUpdate(ctx, offer); err != nil {
 		result.Success = false
@@ -219,7 +218,7 @@ func (p *Processor) ProcessInterestRateEvent(ctx context.Context, event *types.I
 		result.Success = true
 		p.metrics.IncCounter("events_processed_success", map[string]string{"type": "interest_rate"})
 	}
-	
+
 	return result
 }
 
@@ -228,18 +227,18 @@ func (p *Processor) handleMarginOfferCreatedOrUpdated(ctx context.Context, event
 	if event.OfferData == nil {
 		return types.ErrInvalidEventData
 	}
-	
+
 	// Ensure the offer has a valid ID
 	if event.OfferData.ID == "" {
 		event.OfferData.ID = event.OfferID
 	}
-	
+
 	// Set timestamps from event
 	if event.OfferData.CreatedTimestamp.IsZero() {
 		event.OfferData.CreatedTimestamp = event.Timestamp
 	}
 	event.OfferData.UpdatedTimestamp = event.Timestamp
-	
+
 	// Use CreateOrUpdate for consolidated logic
 	return p.store.CreateOrUpdate(ctx, event.OfferData)
 }
@@ -253,13 +252,13 @@ func (p *Processor) handleProcessingError(event *types.MarginOfferEvent, errorMs
 	p.mu.Lock()
 	p.errorCount++
 	p.mu.Unlock()
-	
+
 	p.logger.Error("Failed to process margin offer event",
 		"event_id", event.GetEventKey(),
 		"event_type", event.EventType,
 		"error", errorMsg,
 		"retry_count", event.RetryCount)
-	
+
 	// Implement retry logic if event is retryable
 	if event.IsRetryable() {
 		event.RetryCount++
@@ -278,7 +277,7 @@ func (p *Processor) handleLiquidityProcessingError(event *types.LiquidityEvent, 
 	p.mu.Lock()
 	p.errorCount++
 	p.mu.Unlock()
-	
+
 	p.logger.Error("Failed to process liquidity event",
 		"offer_id", event.OfferID,
 		"event_type", event.EventType,
@@ -289,7 +288,7 @@ func (p *Processor) handleInterestRateProcessingError(event *types.InterestRateE
 	p.mu.Lock()
 	p.errorCount++
 	p.mu.Unlock()
-	
+
 	p.logger.Error("Failed to process interest rate event",
 		"offer_id", event.OfferID,
 		"event_type", event.EventType,

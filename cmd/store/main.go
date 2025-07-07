@@ -1,16 +1,39 @@
 package main
 
 import (
-	"context"
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/piske-alex/margin-offer-system/store"
+	"github.com/piske-alex/margin-offer-system/types"
 )
+
+// SimpleLogger implements the types.Logger interface
+// (prints to standard log)
+type SimpleLogger struct{}
+
+func (l *SimpleLogger) Debug(msg string, fields ...interface{})               { log.Println("DEBUG:", msg, fields) }
+func (l *SimpleLogger) Info(msg string, fields ...interface{})                { log.Println("INFO:", msg, fields) }
+func (l *SimpleLogger) Warn(msg string, fields ...interface{})                { log.Println("WARN:", msg, fields) }
+func (l *SimpleLogger) Error(msg string, fields ...interface{})               { log.Println("ERROR:", msg, fields) }
+func (l *SimpleLogger) Fatal(msg string, fields ...interface{})               { log.Println("FATAL:", msg, fields) }
+func (l *SimpleLogger) WithField(key string, value interface{}) types.Logger  { return l }
+func (l *SimpleLogger) WithFields(fields map[string]interface{}) types.Logger { return l }
+
+// SimpleMetrics implements the types.MetricsCollector interface (no-op)
+type SimpleMetrics struct{}
+
+func (m *SimpleMetrics) IncCounter(name string, tags map[string]string)                             {}
+func (m *SimpleMetrics) AddCounter(name string, value float64, tags map[string]string)              {}
+func (m *SimpleMetrics) SetGauge(name string, value float64, tags map[string]string)                {}
+func (m *SimpleMetrics) RecordDuration(name string, duration time.Duration, tags map[string]string) {}
+func (m *SimpleMetrics) RecordValue(name string, value float64, tags map[string]string)             {}
+func (m *SimpleMetrics) SetHealthy(service string)                                                  {}
+func (m *SimpleMetrics) SetUnhealthy(service string, reason string)                                 {}
 
 func main() {
 	var (
@@ -26,15 +49,13 @@ func main() {
 
 	log.Printf("Starting Margin Offer Store Service on %s", *addr)
 
-	// Create in-memory store
-	memoryStore := store.NewMemoryStore()
+	// Create in-memory store with logger and metrics
+	logger := &SimpleLogger{}
+	metrics := &SimpleMetrics{}
+	memoryStore := store.NewMemoryStore(logger, metrics)
 
 	// Create gRPC server
 	grpcServer := store.NewGRPCServer(memoryStore)
-
-	// Handle graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	// Start server in goroutine
 	go func() {

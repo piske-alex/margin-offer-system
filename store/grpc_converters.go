@@ -2,12 +2,11 @@ package store
 
 import (
 	"fmt"
-	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	pb "github.com/piske-alex/margin-offer-system/proto/gen/go/proto"
 	"github.com/piske-alex/margin-offer-system/types"
-	pb "github.com/piske-alex/margin-offer-system/proto/gen/go"
 )
 
 // protoToMarginOffer converts a protobuf MarginOffer to types.MarginOffer
@@ -42,15 +41,15 @@ func (s *GRPCServer) protoToMarginOffer(proto *pb.MarginOffer) (*types.MarginOff
 
 	offer := &types.MarginOffer{
 		ID:                    proto.Id,
-		OfferType:            offerType,
-		CollateralToken:      proto.CollateralToken,
-		BorrowToken:          proto.BorrowToken,
+		OfferType:             offerType,
+		CollateralToken:       proto.CollateralToken,
+		BorrowToken:           proto.BorrowToken,
 		AvailableBorrowAmount: proto.AvailableBorrowAmount,
-		MaxOpenLTV:           proto.MaxOpenLtv,
-		LiquidationLTV:       proto.LiquidationLtv,
-		InterestRate:         proto.InterestRate,
-		InterestModel:        interestModel,
-		LiquiditySource:      proto.LiquiditySource,
+		MaxOpenLTV:            proto.MaxOpenLtv,
+		LiquidationLTV:        proto.LiquidationLtv,
+		InterestRate:          proto.InterestRate,
+		InterestModel:         interestModel,
+		LiquiditySource:       proto.LiquiditySource,
 	}
 
 	// Handle optional fields
@@ -67,6 +66,11 @@ func (s *GRPCServer) protoToMarginOffer(proto *pb.MarginOffer) (*types.MarginOff
 	if proto.LastBorrowedTimestamp != nil {
 		lastBorrowed := proto.LastBorrowedTimestamp.AsTime()
 		offer.LastBorrowedTimestamp = &lastBorrowed
+	}
+
+	if proto.Source != nil {
+		source := *proto.Source
+		offer.Source = &source
 	}
 
 	if proto.CreatedTimestamp != nil {
@@ -88,17 +92,17 @@ func (s *GRPCServer) marginOfferToProto(offer *types.MarginOffer) (*pb.MarginOff
 
 	proto := &pb.MarginOffer{
 		Id:                    offer.ID,
-		OfferType:            string(offer.OfferType),
-		CollateralToken:      offer.CollateralToken,
-		BorrowToken:          offer.BorrowToken,
+		OfferType:             string(offer.OfferType),
+		CollateralToken:       offer.CollateralToken,
+		BorrowToken:           offer.BorrowToken,
 		AvailableBorrowAmount: offer.AvailableBorrowAmount,
-		MaxOpenLtv:           offer.MaxOpenLTV,
-		LiquidationLtv:       offer.LiquidationLTV,
-		InterestRate:         offer.InterestRate,
-		InterestModel:        string(offer.InterestModel),
-		LiquiditySource:      offer.LiquiditySource,
-		CreatedTimestamp:     timestamppb.New(offer.CreatedTimestamp),
-		UpdatedTimestamp:     timestamppb.New(offer.UpdatedTimestamp),
+		MaxOpenLtv:            offer.MaxOpenLTV,
+		LiquidationLtv:        offer.LiquidationLTV,
+		InterestRate:          offer.InterestRate,
+		InterestModel:         string(offer.InterestModel),
+		LiquiditySource:       offer.LiquiditySource,
+		CreatedTimestamp:      timestamppb.New(offer.CreatedTimestamp),
+		UpdatedTimestamp:      timestamppb.New(offer.UpdatedTimestamp),
 	}
 
 	// Handle optional fields
@@ -112,6 +116,10 @@ func (s *GRPCServer) marginOfferToProto(offer *types.MarginOffer) (*pb.MarginOff
 
 	if offer.LastBorrowedTimestamp != nil {
 		proto.LastBorrowedTimestamp = timestamppb.New(*offer.LastBorrowedTimestamp)
+	}
+
+	if offer.Source != nil {
+		proto.Source = offer.Source
 	}
 
 	return proto, nil
@@ -154,6 +162,9 @@ func (s *GRPCServer) protoToOverwriteFilter(proto *pb.OverwriteFilter) (*types.O
 	}
 	if proto.LiquiditySource != nil {
 		filter.LiquiditySource = proto.LiquiditySource
+	}
+	if proto.Source != nil {
+		filter.Source = proto.Source
 	}
 
 	// Handle time fields
@@ -216,6 +227,9 @@ func (s *GRPCServer) protoToListRequest(proto *pb.ListMarginOffersRequest) (*typ
 	}
 	if proto.LenderAddress != nil {
 		req.LenderAddress = proto.LenderAddress
+	}
+	if proto.Source != nil {
+		req.Source = proto.Source
 	}
 
 	// Handle offer type
