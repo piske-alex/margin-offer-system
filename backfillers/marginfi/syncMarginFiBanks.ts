@@ -1,5 +1,10 @@
-import { Connection, PublicKey } from "@solana/web3.js";
-import { MarginfiClient, getConfig, Bank } from "@mrgnlabs/marginfi-client-v2";
+import { Connection } from "@solana/web3.js";
+import {
+  MarginfiClient,
+  getConfig,
+  Bank,
+  BankMap,
+} from "@mrgnlabs/marginfi-client-v2";
 import { NodeWallet } from "@mrgnlabs/mrgn-common";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
@@ -10,7 +15,7 @@ dotenv.config();
 // gRPC client setup
 const PROTO_PATH = "../../proto/margin_offer.proto";
 const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
-  keepCase: true,
+  keepCase: false, // Convert snake_case to camelCase
   longs: String,
   enums: String,
   defaults: true,
@@ -159,15 +164,16 @@ class MarginFiSyncService {
 
     try {
       // Fetch all banks
-      const banks = await this.fetchAllBanks();
-      console.log(`Fetched ${banks.length} MarginFi banks`);
+      const bankMap = await this.fetchAllBanks();
+      const bankCount = bankMap instanceof Map ? bankMap.size : bankMap.length;
+      console.log(`Fetched ${bankCount} MarginFi banks`);
 
-      if (banks.length === 0) {
+      if (bankCount === 0) {
         console.warn("No banks fetched.");
       }
 
       // Convert banks to margin offers
-      const offers = this.convertBanksToMarginOffers(banks);
+      const offers = await this.convertBanksToMarginOffers(bankMap);
       console.log(`Converted ${offers.length} banks to margin offers`);
 
       // Overwrite the store with new data
@@ -177,7 +183,7 @@ class MarginFiSyncService {
       this.lastSyncTime = new Date();
 
       console.log(`MarginFi banks sync completed in ${duration}ms`, {
-        banks: banks.length,
+        banks: bankCount,
         offers: offers.length,
         duration: `${duration}ms`,
       });
@@ -187,7 +193,7 @@ class MarginFiSyncService {
     }
   }
 
-  private async fetchAllBanks(): Promise<MarginFiBank[]> {
+  private async fetchAllBanks(): Promise<BankMap | MarginFiBank[]> {
     console.log("Fetching MarginFi banks");
 
     try {
@@ -195,52 +201,8 @@ class MarginFiSyncService {
         throw new Error("MarginFi client not initialized");
       }
 
-      // List of common token symbols supported by MarginFi
-      const tokenSymbols = ["SOL", "USDC"];
+      const banks: BankMap = await this.marginfiClient.banks;
 
-      const banks: MarginFiBank[] = [];
-      let foundBanks = 0;
-
-      // Try to get banks for each token symbol
-      for (const tokenSymbol of tokenSymbols) {
-        try {
-          console.log(`Fetching bank for token: ${tokenSymbol}`);
-          const bank = this.marginfiClient.getBankByTokenSymbol(tokenSymbol);
-
-          if (bank) {
-            foundBanks++;
-            console.log(`Found bank for ${tokenSymbol}: ${bank.address}`);
-            // Convert to our format
-            const marginFiBank = await this.convertBankToMarginFiBank(
-              bank,
-              bank.address.toString()
-            );
-
-            if (marginFiBank && marginFiBank.isActive) {
-              banks.push(marginFiBank);
-              console.log(`Added active bank for ${tokenSymbol}`);
-            } else {
-              console.log(
-                `Bank for ${tokenSymbol} is not active or conversion failed`
-              );
-            }
-          } else {
-            console.log(`No bank found for token: ${tokenSymbol}`);
-          }
-        } catch (error) {
-          console.error(`Error fetching bank for ${tokenSymbol}:`, error);
-          continue;
-        }
-      }
-
-      if (banks.length === 0) {
-        console.warn("No active banks found, falling back to mock data");
-        return this.getMockBanks();
-      }
-
-      console.log(
-        `Successfully fetched and parsed ${banks.length} active banks`
-      );
       return banks;
     } catch (error) {
       console.error("Failed to fetch MarginFi banks:", error);
@@ -264,8 +226,14 @@ class MarginFiSyncService {
       const interestRate = bank.computeInterestRates();
 
       // Get LTV ratios from bank config
-      const maxLtv = bank.config.assetWeightInit.toNumber();
-      const liquidationLtv = bank.config.assetWeightMaint.toNumber();
+      // For LTV, we need to use liabilityWeightInit and liabilityWeightMaint
+      // LTV = 1 / liability weight (since higher liability weight = lower LTV allowed)
+      const maxLtv = bank.config.liabilityWeightInit.gt(0)
+        ? 1 / bank.config.liabilityWeightInit.toNumber()
+        : 0.75; // Default max LTV if not set
+      const liquidationLtv = bank.config.liabilityWeightMaint.gt(0)
+        ? 1 / bank.config.liabilityWeightMaint.toNumber()
+        : 0.9; // Default liquidation LTV if not set
 
       // Check if bank is operational
       const isActive = bank.config.operationalState === "Operational";
@@ -273,12 +241,12 @@ class MarginFiSyncService {
       return {
         address: bankAddress,
         collateralToken: bank.mint.toString(),
-        borrowToken: "USDC",
+        borrowToken: bank.mint.toString(),
         availableLiquidity,
         maxLtv,
         liquidationLtv,
         interestRate: interestRate.borrowingRate.toNumber(),
-        interestModel: "compound",
+        interestModel: "floating",
         isActive,
         lastUpdated: new Date(),
       };
@@ -329,9 +297,43 @@ class MarginFiSyncService {
     ];
   }
 
-  private convertBanksToMarginOffers(banks: MarginFiBank[]): MarginOffer[] {
+  private async convertBanksToMarginOffers(
+    banks: BankMap | MarginFiBank[]
+  ): Promise<MarginOffer[]> {
     const now = new Date();
 
+    // Handle BankMap (real data from MarginFi)
+    if (banks instanceof Map) {
+      const marginFiBanks: MarginFiBank[] = [];
+
+      for (const [bankAddress, bank] of banks.entries()) {
+        const marginFiBank = await this.convertBankToMarginFiBank(
+          bank,
+          bankAddress
+        );
+        if (marginFiBank) {
+          marginFiBanks.push(marginFiBank);
+        }
+      }
+
+      return marginFiBanks.map((bank) => ({
+        id: `marginfi_${bank.address}`,
+        offerType: "V1",
+        collateralToken: bank.collateralToken,
+        borrowToken: bank.borrowToken,
+        availableBorrowAmount: bank.availableLiquidity,
+        maxOpenLtv: bank.maxLtv,
+        liquidationLtv: bank.liquidationLtv,
+        interestRate: bank.interestRate,
+        interestModel: bank.interestModel,
+        liquiditySource: "marginfi",
+        source: "marginfi",
+        createdTimestamp: now,
+        updatedTimestamp: now,
+      }));
+    }
+
+    // Handle mock data (array of MarginFiBank)
     return banks.map((bank) => ({
       id: `marginfi_${bank.address}`,
       offerType: "V1",
@@ -373,6 +375,12 @@ class MarginFiSyncService {
             nanos: (offer.updatedTimestamp.getTime() % 1000) * 1000000,
           },
         })),
+        // Add filter to only overwrite MarginFi offers
+        filter: {
+          source: "marginfi",
+        },
+        validateAll: true,
+        dryRun: false,
       };
 
       this.client.BulkOverwriteMarginOffers(
@@ -385,6 +393,8 @@ class MarginFiSyncService {
             console.log("Store overwritten successfully:", {
               deletedCount: response.deletedCount,
               createdCount: response.createdCount,
+              deletedIds: response.deletedIds || [],
+              createdIds: response.createdIds || [],
             });
             resolve();
           }
