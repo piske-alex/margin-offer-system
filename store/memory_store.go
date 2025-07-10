@@ -33,6 +33,9 @@ type MemoryStore struct {
 func NewMemoryStore(logger types.Logger, metrics types.MetricsCollector) *MemoryStore {
 	store := &MemoryStore{
 		offers:              make(map[string]*types.MarginOffer),
+		lenderIndex:         make(map[string][]string),
+		tokenIndex:          make(map[string][]string),
+		offerTypeIndex:      make(map[types.OfferType][]string),
 		logger:              logger,
 		metrics:             metrics,
 		notificationService: NewNotificationService(logger),
@@ -173,6 +176,18 @@ func (ms *MemoryStore) Delete(ctx context.Context, id string) error {
 	// Delete from main storage
 	delete(ms.offers, id)
 	ms.lastUpdate = time.Now().UTC()
+
+	// Send notification
+	if ms.notificationService != nil {
+		ms.notificationService.NotifyChange(&ChangeEvent{
+			ChangeType:  ChangeTypeDeleted,
+			Offer:       offer,
+			Timestamp:   time.Now().UTC(),
+			Source:      "api",
+			OperationID: uuid.New().String(),
+			Metadata:    map[string]string{"method": "Delete"},
+		})
+	}
 
 	return nil
 }

@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/piske-alex/margin-offer-system/types"
 )
 
@@ -40,6 +42,10 @@ func (ms *MemoryStore) BulkCreate(ctx context.Context, offers []*types.MarginOff
 	}
 
 	now := time.Now().UTC()
+	operationID := uuid.New().String()
+
+	// Collect all events for batch notification
+	var events []*ChangeEvent
 
 	// Add all offers
 	for _, offer := range offers {
@@ -52,6 +58,27 @@ func (ms *MemoryStore) BulkCreate(ctx context.Context, offers []*types.MarginOff
 
 		// Update indexes
 		ms.addToIndexes(offer)
+
+		// Prepare notification event
+		events = append(events, &ChangeEvent{
+			ChangeType:  ChangeTypeCreated,
+			Offer:       offer,
+			Timestamp:   now,
+			Source:      "bulk_create",
+			OperationID: operationID,
+			Metadata:    map[string]string{"method": "BulkCreate", "total_offers": fmt.Sprintf("%d", len(offers))},
+		})
+	}
+
+	// Send notifications in batch
+	if ms.notificationService != nil && len(events) > 0 {
+		if len(events) > 10000 {
+			// Use large batch method for very large operations
+			ms.notificationService.NotifyLargeBatch(events)
+		} else {
+			// Use regular batch method for smaller operations
+			ms.notificationService.NotifyBatch(events)
+		}
 	}
 
 	ms.lastUpdate = now
@@ -88,6 +115,10 @@ func (ms *MemoryStore) BulkUpdate(ctx context.Context, offers []*types.MarginOff
 	}
 
 	now := time.Now().UTC()
+	operationID := uuid.New().String()
+
+	// Collect all events for batch notification
+	var events []*ChangeEvent
 
 	// Update all offers
 	for i, offer := range offers {
@@ -103,6 +134,27 @@ func (ms *MemoryStore) BulkUpdate(ctx context.Context, offers []*types.MarginOff
 
 		// Add to new indexes
 		ms.addToIndexes(offer)
+
+		// Prepare notification event
+		events = append(events, &ChangeEvent{
+			ChangeType:  ChangeTypeUpdated,
+			Offer:       offer,
+			Timestamp:   now,
+			Source:      "bulk_update",
+			OperationID: operationID,
+			Metadata:    map[string]string{"method": "BulkUpdate", "total_offers": fmt.Sprintf("%d", len(offers))},
+		})
+	}
+
+	// Send notifications in batch
+	if ms.notificationService != nil && len(events) > 0 {
+		if len(events) > 10000 {
+			// Use large batch method for very large operations
+			ms.notificationService.NotifyLargeBatch(events)
+		} else {
+			// Use regular batch method for smaller operations
+			ms.notificationService.NotifyBatch(events)
+		}
 	}
 
 	ms.lastUpdate = now
@@ -131,6 +183,12 @@ func (ms *MemoryStore) BulkDelete(ctx context.Context, ids []string) error {
 		offersToDelete[i] = offer
 	}
 
+	now := time.Now().UTC()
+	operationID := uuid.New().String()
+
+	// Collect all events for batch notification
+	var events []*ChangeEvent
+
 	// Delete all offers
 	for i, id := range ids {
 		// Remove from indexes
@@ -138,9 +196,30 @@ func (ms *MemoryStore) BulkDelete(ctx context.Context, ids []string) error {
 
 		// Delete from main storage
 		delete(ms.offers, id)
+
+		// Prepare notification event
+		events = append(events, &ChangeEvent{
+			ChangeType:  ChangeTypeDeleted,
+			Offer:       offersToDelete[i],
+			Timestamp:   now,
+			Source:      "bulk_delete",
+			OperationID: operationID,
+			Metadata:    map[string]string{"method": "BulkDelete", "total_offers": fmt.Sprintf("%d", len(ids))},
+		})
 	}
 
-	ms.lastUpdate = time.Now().UTC()
+	// Send notifications in batch
+	if ms.notificationService != nil && len(events) > 0 {
+		if len(events) > 10000 {
+			// Use large batch method for very large operations
+			ms.notificationService.NotifyLargeBatch(events)
+		} else {
+			// Use regular batch method for smaller operations
+			ms.notificationService.NotifyBatch(events)
+		}
+	}
+
+	ms.lastUpdate = now
 	return nil
 }
 

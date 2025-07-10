@@ -45,13 +45,49 @@ func (ms *MemoryStore) BulkCreateOrUpdate(ctx context.Context, offers []*types.M
 	defer ms.mu.Unlock()
 
 	// Process all offers
+	now := time.Now().UTC()
+	operationID := uuid.New().String()
+
+	// Collect all events for batch notification
+	var events []*ChangeEvent
+
 	for _, offer := range offers {
+		// Check if offer exists to determine change type
+		_, exists := ms.offers[offer.ID]
+		wasCreated := !exists
+
 		if err := ms.createOrUpdateInternal(offer); err != nil {
 			return err
 		}
+
+		// Prepare notification event
+		changeType := ChangeTypeCreated
+		if !wasCreated {
+			changeType = ChangeTypeUpdated
+		}
+
+		events = append(events, &ChangeEvent{
+			ChangeType:  changeType,
+			Offer:       offer,
+			Timestamp:   now,
+			Source:      "bulk_upsert",
+			OperationID: operationID,
+			Metadata:    map[string]string{"method": "BulkCreateOrUpdate", "total_offers": fmt.Sprintf("%d", len(offers))},
+		})
 	}
 
-	ms.lastUpdate = time.Now().UTC()
+	// Send notifications in batch
+	if ms.notificationService != nil && len(events) > 0 {
+		if len(events) > 10000 {
+			// Use large batch method for very large operations
+			ms.notificationService.NotifyLargeBatch(events)
+		} else {
+			// Use regular batch method for smaller operations
+			ms.notificationService.NotifyBatch(events)
+		}
+	}
+
+	ms.lastUpdate = now
 	return nil
 }
 
@@ -88,6 +124,9 @@ func (ms *MemoryStore) BulkOverwriteByFilter(ctx context.Context, offers []*type
 	now := time.Now().UTC()
 	operationID := uuid.New().String()
 
+	// Collect all events for batch notification
+	var events []*ChangeEvent
+
 	for _, offer := range offers {
 		// Set timestamps for new offers
 		if offer.CreatedTimestamp.IsZero() {
@@ -100,19 +139,27 @@ func (ms *MemoryStore) BulkOverwriteByFilter(ctx context.Context, offers []*type
 
 		// Update indexes
 		ms.addToIndexes(offer)
+
+		// Prepare notification event
+		events = append(events, &ChangeEvent{
+			ChangeType:  ChangeTypeOverwritten,
+			Offer:       offer,
+			Timestamp:   now,
+			Source:      "backfiller",
+			OperationID: operationID,
+			Metadata:    map[string]string{"method": "BulkOverwriteByFilter", "total_offers": fmt.Sprintf("%d", len(offers))},
+		})
 	}
 
-	// Send notifications for all overwritten offers
-	if ms.notificationService != nil {
-		for _, offer := range offers {
-			ms.notificationService.NotifyChange(&ChangeEvent{
-				ChangeType:  ChangeTypeOverwritten,
-				Offer:       offer,
-				Timestamp:   now,
-				Source:      "backfiller",
-				OperationID: operationID,
-				Metadata:    map[string]string{"method": "BulkOverwriteByFilter", "total_offers": fmt.Sprintf("%d", len(offers))},
-			})
+	// Send notifications in batch
+	if ms.notificationService != nil && len(events) > 0 {
+		fmt.Println("Sending notifications in batch", len(events))
+		if len(events) > 10000 {
+			// Use large batch method for very large operations
+			ms.notificationService.NotifyLargeBatch(events)
+		} else {
+			// Use regular batch method for smaller operations
+			ms.notificationService.NotifyBatch(events)
 		}
 	}
 
