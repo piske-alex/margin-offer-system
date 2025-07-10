@@ -1,27 +1,38 @@
-import { Connection, PublicKey } from "@solana/web3.js";
-import { MarginfiClient, getConfig } from '@mrgnlabs/marginfi-client-v2';
+import { Connection } from "@solana/web3.js";
+import {
+  MarginfiClient,
+  getConfig,
+  Bank,
+  BankMap,
+  computeMaxLeverage,
+} from "@mrgnlabs/marginfi-client-v2";
 import { NodeWallet } from "@mrgnlabs/mrgn-common";
-import * as grpc from '@grpc/grpc-js';
-import * as protoLoader from '@grpc/proto-loader';
-import { promisify } from 'util';
+import * as grpc from "@grpc/grpc-js";
+import * as protoLoader from "@grpc/proto-loader";
+import * as dotenv from "dotenv";
+
+dotenv.config();
 
 // gRPC client setup
-const PROTO_PATH = '../proto/margin_offer.proto';
+const PROTO_PATH = "../../proto/margin_offer.proto";
 const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
-  keepCase: true,
+  keepCase: false, // Convert snake_case to camelCase
   longs: String,
   enums: String,
   defaults: true,
-  oneofs: true
+  oneofs: true,
 });
 
 const protoDescriptor = grpc.loadPackageDefinition(packageDefinition);
-const marginOfferService = (protoDescriptor as any).marginoffer?.v1?.MarginOfferService;
+const marginOfferService = (protoDescriptor as any).marginoffer?.v1
+  ?.MarginOfferService;
 
 // Configuration
-const STORE_GRPC_ADDRESS = process.env.STORE_GRPC_ADDRESS || 'localhost:8080';
-const SYNC_INTERVAL_MS = parseInt(process.env.SYNC_INTERVAL_MS || '900000'); // 15 minutes
-const MARGINFI_PROGRAM_ID = 'MFv2hKfKT5vk5wrX1Y5y3EmwQ5qkAv4DqFnpRZmUxWL';
+const STORE_GRPC_ADDRESS = process.env.STORE_GRPC_ADDRESS || "localhost:8080";
+const SYNC_INTERVAL_MS = parseInt(process.env.SYNC_INTERVAL_MS || "900000"); // 15 minutes
+const SOLANA_RPC_ENDPOINT =
+  process.env.SOLANA_RPC_ENDPOINT || "https://api.mainnet-beta.solana.com";
+const MARGINFI_PROGRAM_ID = "MFv2hKfKT5vk5wrX1Y5y3EmwQ5qkAv4DqFnpRZmUxWL";
 
 // Types
 interface MarginFiBank {
@@ -29,12 +40,13 @@ interface MarginFiBank {
   collateralToken: string;
   borrowToken: string;
   availableLiquidity: number;
-  maxLtv: number;
-  liquidationLtv: number;
+
   interestRate: number;
   interestModel: string;
   isActive: boolean;
   lastUpdated: Date;
+  group: string;
+  originalBank: Bank;
 }
 
 interface MarginOffer {
@@ -55,7 +67,7 @@ interface MarginOffer {
 
 class MarginFiSyncService {
   private client: any;
-  private marginfiClient: any;
+  private marginfiClient: MarginfiClient | null = null;
   private connection: Connection;
   private wallet: NodeWallet;
   private config: any;
@@ -71,24 +83,28 @@ class MarginFiSyncService {
     );
 
     // Initialize Solana connection
-    this.connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
+    this.connection = new Connection(SOLANA_RPC_ENDPOINT, "confirmed");
     this.wallet = NodeWallet.local();
     this.config = getConfig();
   }
 
   async initialize(): Promise<void> {
     try {
-      console.log('Initializing MarginFi sync service...');
-      
+      console.log("Initializing MarginFi sync service...");
+
       // Test gRPC connection
       await this.testGrpcConnection();
-      
+
       // Initialize MarginFi client
-      this.marginfiClient = await MarginfiClient.fetch(this.config, this.wallet, this.connection);
-      
-      console.log('MarginFi sync service initialized successfully');
+      this.marginfiClient = await MarginfiClient.fetch(
+        this.config,
+        this.wallet,
+        this.connection
+      );
+
+      console.log("MarginFi sync service initialized successfully");
     } catch (error) {
-      console.error('Failed to initialize MarginFi sync service:', error);
+      console.error("Failed to initialize MarginFi sync service:", error);
       throw error;
     }
   }
@@ -99,7 +115,7 @@ class MarginFiSyncService {
         if (error) {
           reject(new Error(`gRPC connection failed: ${error.message}`));
         } else {
-          console.log('gRPC connection established successfully');
+          console.log("gRPC connection established successfully");
           resolve();
         }
       });
@@ -108,11 +124,13 @@ class MarginFiSyncService {
 
   async start(): Promise<void> {
     if (this.isRunning) {
-      console.log('MarginFi sync service is already running');
+      console.log("MarginFi sync service is already running");
       return;
     }
 
-    console.log(`Starting MarginFi sync service with ${SYNC_INTERVAL_MS}ms interval`);
+    console.log(
+      `Starting MarginFi sync service with ${SYNC_INTERVAL_MS}ms interval`
+    );
     this.isRunning = true;
 
     // Run initial sync
@@ -123,7 +141,7 @@ class MarginFiSyncService {
       try {
         await this.syncBanks();
       } catch (error) {
-        console.error('Periodic sync failed:', error);
+        console.error("Periodic sync failed:", error);
       }
     }, SYNC_INTERVAL_MS);
   }
@@ -133,7 +151,7 @@ class MarginFiSyncService {
       return;
     }
 
-    console.log('Stopping MarginFi sync service...');
+    console.log("Stopping MarginFi sync service...");
     this.isRunning = false;
 
     if (this.syncInterval) {
@@ -144,15 +162,20 @@ class MarginFiSyncService {
 
   async syncBanks(): Promise<void> {
     const startTime = Date.now();
-    console.log('Starting MarginFi banks sync...');
+    console.log("Starting MarginFi banks sync...");
 
     try {
       // Fetch all banks
-      const banks = await this.fetchAllBanks();
-      console.log(`Fetched ${banks.length} MarginFi banks`);
+      const bankMap = await this.fetchAllBanks();
+      const bankCount = bankMap.size;
+      console.log(`Fetched ${bankCount} MarginFi banks`);
+
+      if (bankCount === 0) {
+        console.warn("No banks fetched.");
+      }
 
       // Convert banks to margin offers
-      const offers = this.convertBanksToMarginOffers(banks);
+      const offers = await this.convertBanksToMarginOffers(bankMap);
       console.log(`Converted ${offers.length} banks to margin offers`);
 
       // Overwrite the store with new data
@@ -162,130 +185,189 @@ class MarginFiSyncService {
       this.lastSyncTime = new Date();
 
       console.log(`MarginFi banks sync completed in ${duration}ms`, {
-        banks: banks.length,
+        banks: bankCount,
         offers: offers.length,
-        duration: `${duration}ms`
+        duration: `${duration}ms`,
       });
     } catch (error) {
-      console.error('MarginFi banks sync failed:', error);
+      console.error("MarginFi banks sync failed:", error);
       throw error;
     }
   }
 
-  private async fetchAllBanks(): Promise<MarginFiBank[]> {
-    console.log(`Fetching MarginFi banks from program ${MARGINFI_PROGRAM_ID}`);
-    
+  private async fetchAllBanks(): Promise<BankMap> {
+    console.log("Fetching MarginFi banks");
+
     try {
-      // Get all bank accounts from the MarginFi program
-      const programId = new PublicKey(MARGINFI_PROGRAM_ID);
-      const accounts = await this.connection.getProgramAccounts(
-        programId,
-        {
-          encoding: 'base64',
-          filters: [
-            {
-              dataSize: 1024, // Approximate size of MarginFi bank account
-            },
-          ],
-        }
-      );
-
-      console.log(`Found ${accounts.length} bank accounts`);
-
-      // Parse and convert accounts to bank objects
-      const banks: MarginFiBank[] = [];
-      
-      for (const account of accounts) {
-        try {
-          const bank = await this.parseBankAccount(account);
-          if (bank && bank.isActive) {
-            banks.push(bank);
-          }
-        } catch (error) {
-          console.warn(`Failed to parse bank account ${account.pubkey.toString()}:`, error);
-        }
+      if (!this.marginfiClient) {
+        throw new Error("MarginFi client not initialized");
       }
+
+      const banks: BankMap = this.marginfiClient.banks;
 
       return banks;
     } catch (error) {
-      console.error('Failed to fetch MarginFi banks:', error);
-      
-      // Return mock data for development/testing
-      return this.getMockBanks();
+      console.error("Failed to fetch MarginFi banks:", error);
+      throw error;
     }
   }
 
-  private async parseBankAccount(account: any): Promise<MarginFiBank | null> {
-    // This would implement the actual parsing of MarginFi bank account data
-    // For now, return mock data
-    return null;
+  private async convertBankToMarginFiBank(
+    bank: Bank,
+    bankAddress: string
+  ): Promise<MarginFiBank | null> {
+    try {
+      // Calculate metrics using the Bank properties
+      const totalDeposits = bank.getTotalAssetQuantity().toNumber();
+      const totalBorrows = bank.getTotalLiabilityQuantity().toNumber();
+      const availableLiquidity = Math.max(0, totalDeposits - totalBorrows);
+
+      const interestRate = bank.computeInterestRates();
+
+      // Get group information from the bank
+      const group = bank.group;
+
+      // Check if bank is operational
+      const isActive = bank.config.operationalState === "Operational";
+
+      // Each bank represents a single token, so both collateral and borrow are the same
+      const tokenMint = bank.mint.toString();
+
+      return {
+        address: bankAddress,
+        collateralToken: tokenMint,
+        borrowToken: tokenMint, // Same as collateral since each bank is single-token
+        availableLiquidity,
+        interestRate: interestRate.borrowingRate.toNumber(),
+        interestModel: "floating",
+        isActive,
+        lastUpdated: new Date(),
+        group: group.toString(),
+        originalBank: bank,
+      };
+    } catch (error) {
+      console.error(`Error converting bank ${bankAddress}:`, error);
+      return null;
+    }
   }
 
-  private getMockBanks(): MarginFiBank[] {
-    return [
-      {
-        address: 'Bank1Address',
-        collateralToken: 'SOL',
-        borrowToken: 'USDC',
-        availableLiquidity: 1000000.0,
-        maxLtv: 0.75,
-        liquidationLtv: 0.85,
-        interestRate: 0.05,
-        interestModel: 'floating',
-        isActive: true,
-        lastUpdated: new Date(),
-      },
-      {
-        address: 'Bank2Address',
-        collateralToken: 'ETH',
-        borrowToken: 'USDC',
-        availableLiquidity: 500000.0,
-        maxLtv: 0.70,
-        liquidationLtv: 0.80,
-        interestRate: 0.06,
-        interestModel: 'floating',
-        isActive: true,
-        lastUpdated: new Date(),
-      },
-      {
-        address: 'Bank3Address',
-        collateralToken: 'BTC',
-        borrowToken: 'USDC',
-        availableLiquidity: 750000.0,
-        maxLtv: 0.65,
-        liquidationLtv: 0.75,
-        interestRate: 0.04,
-        interestModel: 'floating',
-        isActive: true,
-        lastUpdated: new Date(),
-      },
-    ];
-  }
 
-  private convertBanksToMarginOffers(banks: MarginFiBank[]): MarginOffer[] {
+  private async convertBanksToMarginOffers(
+    banks: BankMap | MarginFiBank[]
+  ): Promise<MarginOffer[]> {
     const now = new Date();
+
+    // Handle BankMap (real data from MarginFi)
+    if (banks instanceof Map) {
+      const marginFiBanks: MarginFiBank[] = [];
+
+      for (const [bankAddress, bank] of banks.entries()) {
+        const marginFiBank = await this.convertBankToMarginFiBank(
+          bank,
+          bankAddress
+        );
+        if (marginFiBank) {
+          marginFiBanks.push(marginFiBank);
+        }
+      }
+      
+
+      // Group banks by their group (assuming all banks are in the same group for now)
+      // In a real implementation, you would get the group from the bank configuration
+      const bankGroups = this.groupBanksByGroup(marginFiBanks);
+      
+      // Create offers for all permutations within each group
+      const offers: MarginOffer[] = [];
+      
+      for (const [groupKey, groupBanks] of bankGroups.entries()) {
+        const groupOffers = this.createOffersForGroup(groupBanks, now);
+        offers.push(...groupOffers);
+      }
+
+      return offers;
+    }
+
+    // Handle mock data (array of MarginFiBank)
+    // For mock data, we'll create a simple group with all banks
+    const bankGroups = this.groupBanksByGroup(banks);
+    const offers: MarginOffer[] = [];
     
-    return banks.map(bank => ({
-      id: `marginfi_${bank.address}`,
-      offerType: 'V1',
-      collateralToken: bank.collateralToken,
-      borrowToken: bank.borrowToken,
-      availableBorrowAmount: bank.availableLiquidity,
-      maxOpenLtv: bank.maxLtv,
-      liquidationLtv: bank.liquidationLtv,
-      interestRate: bank.interestRate,
-      interestModel: bank.interestModel,
-      liquiditySource: 'marginfi',
-      source: 'marginfi',
-      createdTimestamp: now,
-      updatedTimestamp: now,
-    }));
+    for (const [groupKey, groupBanks] of bankGroups.entries()) {
+      const groupOffers = this.createOffersForGroup(groupBanks, now);
+      offers.push(...groupOffers);
+    }
+
+    return offers;
+  }
+
+  private groupBanksByGroup(banks: MarginFiBank[]): Map<string, MarginFiBank[]> {
+    const groups = new Map<string, MarginFiBank[]>();
+    
+    // Group banks by their actual group
+    for (const bank of banks) {
+      const groupKey = bank.group;
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, []);
+      }
+      groups.get(groupKey)!.push(bank);
+    }
+    
+    console.log(`Grouped ${banks.length} banks into ${groups.size} group(s)`);
+    for (const [groupKey, groupBanks] of groups.entries()) {
+      const tokens = [...new Set(groupBanks.map(bank => bank.collateralToken))];
+      console.log(`Group "${groupKey}": ${groupBanks.length} banks with tokens: ${tokens.join(', ')}`);
+    }
+    
+    return groups;
+  }
+
+  private createOffersForGroup(groupBanks: MarginFiBank[], now: Date): MarginOffer[] {
+    const offers: MarginOffer[] = [];
+    
+    // Get all unique tokens in this group
+    const tokens = [...new Set(groupBanks.map(bank => bank.collateralToken))];
+    console.log(`Creating offers for group with tokens: ${tokens.join(', ')}`);
+    
+    // Create offers for all possible collateral/borrow token permutations
+    for (let i = 0; i < tokens.length; i++) {
+      for (let j = 0; j < tokens.length; j++) {
+        if (i !== j) { // Skip self-borrowing (collateral = borrow)
+          const collateralToken = tokens[i];
+          const borrowToken = tokens[j];
+          
+          // Find the bank for the borrow token to get its properties
+          const borrowBank = groupBanks.find(bank => bank.collateralToken === borrowToken);
+          const depositBank = groupBanks.find(bank => bank.collateralToken === collateralToken);
+          
+          if (borrowBank) {
+            offers.push({
+              id: `marginfi_${collateralToken}_${borrowToken}`,
+              offerType: "V1",
+              collateralToken,
+              borrowToken,
+              availableBorrowAmount: borrowBank.availableLiquidity,
+              maxOpenLtv: computeMaxLeverage(depositBank.originalBank, borrowBank.originalBank).ltv-0.01,
+              liquidationLtv: computeMaxLeverage(depositBank.originalBank, borrowBank.originalBank).ltv,
+              interestRate: borrowBank.interestRate,
+              interestModel: borrowBank.interestModel,
+              liquiditySource: "marginfi",
+              source: "marginfi",
+              createdTimestamp: now,
+              updatedTimestamp: now,
+            });
+          }
+        }
+      }
+    }
+    
+    console.log(`Created ${offers.length} offers for group (${tokens.length} tokens = ${tokens.length * (tokens.length - 1)} permutations)`);
+    return offers;
   }
 
   private async overwriteStore(offers: MarginOffer[]): Promise<void> {
     return new Promise((resolve, reject) => {
       const request = {
-        offers: offers.map(offer => ({
+        offers: offers.filter((offer) => offer.maxOpenLtv > 0).map((offer) => ({
           id: offer.id,
           offerType: offer.offerType,
           collateralToken: offer.collateralToken,
@@ -306,25 +388,36 @@ class MarginFiSyncService {
             nanos: (offer.updatedTimestamp.getTime() % 1000) * 1000000,
           },
         })),
+        // Add filter to only overwrite MarginFi offers
+        filter: {
+          source: "marginfi",
+        },
+        validateAll: true,
+        dryRun: false,
       };
 
-      this.client.BulkOverwriteMarginOffers(request, (error: any, response: any) => {
-        if (error) {
-          console.error('Failed to overwrite store:', error);
-          reject(error);
-        } else {
-          console.log('Store overwritten successfully:', {
-            deletedCount: response.deletedCount,
-            createdCount: response.createdCount,
-          });
-          resolve();
+      this.client.BulkOverwriteMarginOffers(
+        request,
+        (error: any, response: any) => {
+          if (error) {
+            console.error("Failed to overwrite store:", error);
+            reject(error);
+          } else {
+            console.log("Store overwritten successfully:", {
+              deletedCount: response.deletedCount,
+              createdCount: response.createdCount,
+              deletedIds: response.deletedIds || [],
+              createdIds: response.createdIds || [],
+            });
+            resolve();
+          }
         }
-      });
+      );
     });
   }
 
   async forceSync(): Promise<void> {
-    console.log('Force sync triggered');
+    console.log("Force sync triggered");
     await this.syncBanks();
   }
 
@@ -332,7 +425,9 @@ class MarginFiSyncService {
     return {
       isRunning: this.isRunning,
       lastSyncTime: this.lastSyncTime,
-      nextSyncTime: this.lastSyncTime ? new Date(this.lastSyncTime.getTime() + SYNC_INTERVAL_MS) : undefined,
+      nextSyncTime: this.lastSyncTime
+        ? new Date(this.lastSyncTime.getTime() + SYNC_INTERVAL_MS)
+        : undefined,
       syncIntervalMs: SYNC_INTERVAL_MS,
       programId: MARGINFI_PROGRAM_ID,
       grpcAddress: STORE_GRPC_ADDRESS,
@@ -343,29 +438,28 @@ class MarginFiSyncService {
 // Main execution
 async function main() {
   const syncService = new MarginFiSyncService();
-  
+
   try {
     await syncService.initialize();
     await syncService.start();
-    
-    console.log('MarginFi sync service started successfully');
-    console.log('Status:', syncService.getStatus());
-    
+
+    console.log("MarginFi sync service started successfully");
+    console.log("Status:", syncService.getStatus());
+
     // Keep the process running
-    process.on('SIGINT', async () => {
-      console.log('Received SIGINT, shutting down...');
+    process.on("SIGINT", async () => {
+      console.log("Received SIGINT, shutting down...");
       await syncService.stop();
       process.exit(0);
     });
-    
-    process.on('SIGTERM', async () => {
-      console.log('Received SIGTERM, shutting down...');
+
+    process.on("SIGTERM", async () => {
+      console.log("Received SIGTERM, shutting down...");
       await syncService.stop();
       process.exit(0);
     });
-    
   } catch (error) {
-    console.error('Failed to start MarginFi sync service:', error);
+    console.error("Failed to start MarginFi sync service:", error);
     process.exit(1);
   }
 }

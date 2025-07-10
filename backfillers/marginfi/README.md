@@ -92,9 +92,7 @@ await syncService.stop();
 - Tests connectivity to both services
 
 ### 2. Bank Fetching
-- Queries all bank accounts from the MarginFi program using `getProgramAccounts`
-- Filters accounts by data size (approximate bank account size)
-- Parses account data to extract bank information
+- Queries all bank accounts from the MarginFi program using `MarginfiClient.banks`.
 
 ### 3. Data Mapping
 - Converts MarginFi banks to standardized margin offers
