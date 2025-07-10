@@ -4,6 +4,7 @@ import {
   getConfig,
   Bank,
   BankMap,
+  computeMaxLeverage,
 } from "@mrgnlabs/marginfi-client-v2";
 import { NodeWallet } from "@mrgnlabs/mrgn-common";
 import * as grpc from "@grpc/grpc-js";
@@ -39,12 +40,13 @@ interface MarginFiBank {
   collateralToken: string;
   borrowToken: string;
   availableLiquidity: number;
-  maxLtv: number;
-  liquidationLtv: number;
+
   interestRate: number;
   interestModel: string;
   isActive: boolean;
   lastUpdated: Date;
+  group: string;
+  originalBank: Bank;
 }
 
 interface MarginOffer {
@@ -165,7 +167,7 @@ class MarginFiSyncService {
     try {
       // Fetch all banks
       const bankMap = await this.fetchAllBanks();
-      const bankCount = bankMap instanceof Map ? bankMap.size : bankMap.length;
+      const bankCount = bankMap.size;
       console.log(`Fetched ${bankCount} MarginFi banks`);
 
       if (bankCount === 0) {
@@ -193,7 +195,7 @@ class MarginFiSyncService {
     }
   }
 
-  private async fetchAllBanks(): Promise<BankMap | MarginFiBank[]> {
+  private async fetchAllBanks(): Promise<BankMap> {
     console.log("Fetching MarginFi banks");
 
     try {
@@ -201,15 +203,12 @@ class MarginFiSyncService {
         throw new Error("MarginFi client not initialized");
       }
 
-      const banks: BankMap = await this.marginfiClient.banks;
+      const banks: BankMap = this.marginfiClient.banks;
 
       return banks;
     } catch (error) {
       console.error("Failed to fetch MarginFi banks:", error);
-
-      // Return mock data for development/testing
-      console.log("Falling back to mock data");
-      return this.getMockBanks();
+      throw error;
     }
   }
 
@@ -225,30 +224,26 @@ class MarginFiSyncService {
 
       const interestRate = bank.computeInterestRates();
 
-      // Get LTV ratios from bank config
-      // For LTV, we need to use liabilityWeightInit and liabilityWeightMaint
-      // LTV = 1 / liability weight (since higher liability weight = lower LTV allowed)
-      const maxLtv = bank.config.liabilityWeightInit.gt(0)
-        ? 1 / bank.config.liabilityWeightInit.toNumber()
-        : 0.75; // Default max LTV if not set
-      const liquidationLtv = bank.config.liabilityWeightMaint.gt(0)
-        ? 1 / bank.config.liabilityWeightMaint.toNumber()
-        : 0.9; // Default liquidation LTV if not set
+      // Get group information from the bank
+      const group = bank.group;
 
       // Check if bank is operational
       const isActive = bank.config.operationalState === "Operational";
 
+      // Each bank represents a single token, so both collateral and borrow are the same
+      const tokenMint = bank.mint.toString();
+
       return {
         address: bankAddress,
-        collateralToken: bank.mint.toString(),
-        borrowToken: bank.mint.toString(),
+        collateralToken: tokenMint,
+        borrowToken: tokenMint, // Same as collateral since each bank is single-token
         availableLiquidity,
-        maxLtv,
-        liquidationLtv,
         interestRate: interestRate.borrowingRate.toNumber(),
         interestModel: "floating",
         isActive,
         lastUpdated: new Date(),
+        group: group.toString(),
+        originalBank: bank,
       };
     } catch (error) {
       console.error(`Error converting bank ${bankAddress}:`, error);
@@ -256,46 +251,6 @@ class MarginFiSyncService {
     }
   }
 
-  private getMockBanks(): MarginFiBank[] {
-    return [
-      {
-        address: "Bank1Address",
-        collateralToken: "SOL",
-        borrowToken: "USDC",
-        availableLiquidity: 1000000.0,
-        maxLtv: 0.75,
-        liquidationLtv: 0.85,
-        interestRate: 0.05,
-        interestModel: "floating",
-        isActive: true,
-        lastUpdated: new Date(),
-      },
-      {
-        address: "Bank2Address",
-        collateralToken: "ETH",
-        borrowToken: "USDC",
-        availableLiquidity: 500000.0,
-        maxLtv: 0.7,
-        liquidationLtv: 0.8,
-        interestRate: 0.06,
-        interestModel: "floating",
-        isActive: true,
-        lastUpdated: new Date(),
-      },
-      {
-        address: "Bank3Address",
-        collateralToken: "BTC",
-        borrowToken: "USDC",
-        availableLiquidity: 750000.0,
-        maxLtv: 0.65,
-        liquidationLtv: 0.75,
-        interestRate: 0.04,
-        interestModel: "floating",
-        isActive: true,
-        lastUpdated: new Date(),
-      },
-    ];
-  }
 
   private async convertBanksToMarginOffers(
     banks: BankMap | MarginFiBank[]
@@ -315,46 +270,104 @@ class MarginFiSyncService {
           marginFiBanks.push(marginFiBank);
         }
       }
+      
 
-      return marginFiBanks.map((bank) => ({
-        id: `marginfi_${bank.address}`,
-        offerType: "V1",
-        collateralToken: bank.collateralToken,
-        borrowToken: bank.borrowToken,
-        availableBorrowAmount: bank.availableLiquidity,
-        maxOpenLtv: bank.maxLtv,
-        liquidationLtv: bank.liquidationLtv,
-        interestRate: bank.interestRate,
-        interestModel: bank.interestModel,
-        liquiditySource: "marginfi",
-        source: "marginfi",
-        createdTimestamp: now,
-        updatedTimestamp: now,
-      }));
+      // Group banks by their group (assuming all banks are in the same group for now)
+      // In a real implementation, you would get the group from the bank configuration
+      const bankGroups = this.groupBanksByGroup(marginFiBanks);
+      
+      // Create offers for all permutations within each group
+      const offers: MarginOffer[] = [];
+      
+      for (const [groupKey, groupBanks] of bankGroups.entries()) {
+        const groupOffers = this.createOffersForGroup(groupBanks, now);
+        offers.push(...groupOffers);
+      }
+
+      return offers;
     }
 
     // Handle mock data (array of MarginFiBank)
-    return banks.map((bank) => ({
-      id: `marginfi_${bank.address}`,
-      offerType: "V1",
-      collateralToken: bank.collateralToken,
-      borrowToken: bank.borrowToken,
-      availableBorrowAmount: bank.availableLiquidity,
-      maxOpenLtv: bank.maxLtv,
-      liquidationLtv: bank.liquidationLtv,
-      interestRate: bank.interestRate,
-      interestModel: bank.interestModel,
-      liquiditySource: "marginfi",
-      source: "marginfi",
-      createdTimestamp: now,
-      updatedTimestamp: now,
-    }));
+    // For mock data, we'll create a simple group with all banks
+    const bankGroups = this.groupBanksByGroup(banks);
+    const offers: MarginOffer[] = [];
+    
+    for (const [groupKey, groupBanks] of bankGroups.entries()) {
+      const groupOffers = this.createOffersForGroup(groupBanks, now);
+      offers.push(...groupOffers);
+    }
+
+    return offers;
+  }
+
+  private groupBanksByGroup(banks: MarginFiBank[]): Map<string, MarginFiBank[]> {
+    const groups = new Map<string, MarginFiBank[]>();
+    
+    // Group banks by their actual group
+    for (const bank of banks) {
+      const groupKey = bank.group;
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, []);
+      }
+      groups.get(groupKey)!.push(bank);
+    }
+    
+    console.log(`Grouped ${banks.length} banks into ${groups.size} group(s)`);
+    for (const [groupKey, groupBanks] of groups.entries()) {
+      const tokens = [...new Set(groupBanks.map(bank => bank.collateralToken))];
+      console.log(`Group "${groupKey}": ${groupBanks.length} banks with tokens: ${tokens.join(', ')}`);
+    }
+    
+    return groups;
+  }
+
+  private createOffersForGroup(groupBanks: MarginFiBank[], now: Date): MarginOffer[] {
+    const offers: MarginOffer[] = [];
+    
+    // Get all unique tokens in this group
+    const tokens = [...new Set(groupBanks.map(bank => bank.collateralToken))];
+    console.log(`Creating offers for group with tokens: ${tokens.join(', ')}`);
+    
+    // Create offers for all possible collateral/borrow token permutations
+    for (let i = 0; i < tokens.length; i++) {
+      for (let j = 0; j < tokens.length; j++) {
+        if (i !== j) { // Skip self-borrowing (collateral = borrow)
+          const collateralToken = tokens[i];
+          const borrowToken = tokens[j];
+          
+          // Find the bank for the borrow token to get its properties
+          const borrowBank = groupBanks.find(bank => bank.collateralToken === borrowToken);
+          const depositBank = groupBanks.find(bank => bank.collateralToken === collateralToken);
+          
+          if (borrowBank) {
+            offers.push({
+              id: `marginfi_${collateralToken}_${borrowToken}`,
+              offerType: "V1",
+              collateralToken,
+              borrowToken,
+              availableBorrowAmount: borrowBank.availableLiquidity,
+              maxOpenLtv: computeMaxLeverage(depositBank.originalBank, borrowBank.originalBank).ltv-0.01,
+              liquidationLtv: computeMaxLeverage(depositBank.originalBank, borrowBank.originalBank).ltv,
+              interestRate: borrowBank.interestRate,
+              interestModel: borrowBank.interestModel,
+              liquiditySource: "marginfi",
+              source: "marginfi",
+              createdTimestamp: now,
+              updatedTimestamp: now,
+            });
+          }
+        }
+      }
+    }
+    
+    console.log(`Created ${offers.length} offers for group (${tokens.length} tokens = ${tokens.length * (tokens.length - 1)} permutations)`);
+    return offers;
   }
 
   private async overwriteStore(offers: MarginOffer[]): Promise<void> {
     return new Promise((resolve, reject) => {
       const request = {
-        offers: offers.map((offer) => ({
+        offers: offers.filter((offer) => offer.maxOpenLtv > 0).map((offer) => ({
           id: offer.id,
           offerType: offer.offerType,
           collateralToken: offer.collateralToken,
